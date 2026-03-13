@@ -3,3 +3,6 @@ CLAUDE.md
 EXAMPLE.md
 BRIEF.md
 .claude
+node_modules/
+dist/
+*.tsbuildinfo
