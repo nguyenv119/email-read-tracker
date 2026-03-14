@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "MailTrack",
+  "version": "0.1.0",
+  "description": "Track when your Gmail recipients open your emails.",
+  "permissions": ["identity", "activeTab", "storage"],
+  "oauth2": {
+    "client_id": "YOUR_GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com",
+    "scopes": ["https://www.googleapis.com/auth/gmail.send"]
+  },
+  "background": {
+    "service_worker": "dist/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://mail.google.com/*"],
+      "js": ["dist/content.js"]
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "@mailtrack/extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/content.ts src/background.ts --bundle --outdir=dist --platform=browser --target=chrome120",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@mailtrack/shared": "*"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.317",
+    "esbuild": "^0.25.0",
+    "jsdom": "^26.1.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.0.0"
+  }
+}
