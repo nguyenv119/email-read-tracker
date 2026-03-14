@@ -1,6 +1,7 @@
 {
   "files": [],
   "references": [
-    { "path": "./shared" }
+    { "path": "./shared" },
+    { "path": "./backend" }
   ]
 }
