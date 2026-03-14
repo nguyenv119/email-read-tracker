@@ -3,3 +3,10 @@ CLAUDE.md
 EXAMPLE.md
 BRIEF.md
 .claude
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Dolt database files
+.dolt/
+*.db

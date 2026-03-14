@@ -1,0 +1,20 @@
+{
+  "name": "@mailtrack/shared",
+  "version": "0.1.0",
+  "main": "./dist/types.js",
+  "types": "./dist/types.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/types.js",
+      "types": "./dist/types.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "vitest": "^3.0.0"
+  }
+}

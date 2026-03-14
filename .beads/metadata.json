@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_database": "email_read_tracker",
+  "project_id": "e07d9b58-bbc1-474c-bd7a-ec3c2b673555"
+}
