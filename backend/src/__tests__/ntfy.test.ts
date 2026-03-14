@@ -57,6 +57,53 @@ describe("ntfy", () => {
     expect(body).toContain("alice@example.com");
   });
 
+  it("throws when the ntfy.sh HTTP response is not ok (non-2xx status)", async () => {
+    /**
+     * Verifies that notifyOpen() throws an Error when the ntfy.sh server
+     * returns a non-2xx response (e.g., 403 Forbidden or 429 Too Many Requests)
+     * rather than silently swallowing the failure.
+     *
+     * This matters because a silent failure means the operator has no signal
+     * that notifications are broken. If ntfy.sh rejects requests (rate-limit,
+     * auth failure, wrong topic), the user should see an error in logs rather
+     * than believing notifications are working.
+     *
+     * If this contract breaks, failed notification deliveries are silently
+     * dropped and the operator has no way to detect the outage.
+     */
+    // REVIEW: mocking core dependency — test may not reflect real behavior
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 403 });
+    vi.resetModules();
+    const { notifyOpen } = await import("../ntfy.js");
+
+    await expect(notifyOpen("px-1", "user@example.com")).rejects.toThrow();
+  });
+
+  it("URL-encodes the topic when constructing the ntfy.sh URL", async () => {
+    /**
+     * Verifies that notifyOpen() percent-encodes the NTFY_TOPIC value before
+     * interpolating it into the URL, so topics with special characters (spaces,
+     * slashes, etc.) produce a valid URL rather than a malformed one.
+     *
+     * This matters because an unencoded special character in the URL path
+     * (e.g., a space or slash) causes the HTTP request to target the wrong
+     * resource or fail with a parse error, silently dropping the notification.
+     *
+     * If this contract breaks, any topic name containing special characters
+     * causes all notifications to be silently dropped or routed incorrectly.
+     */
+    // REVIEW: mocking core dependency — test may not reflect real behavior
+    process.env["NTFY_TOPIC"] = "my topic/with spaces";
+    fetchMock.mockResolvedValueOnce({ ok: true, status: 200 });
+    vi.resetModules();
+    const { notifyOpen } = await import("../ntfy.js");
+
+    await notifyOpen("px-1", "user@example.com");
+
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toBe("https://ntfy.sh/my%20topic%2Fwith%20spaces");
+  });
+
   it("throws when NTFY_TOPIC env var is missing", async () => {
     /**
      * Verifies that notifyOpen() throws a descriptive error when the required

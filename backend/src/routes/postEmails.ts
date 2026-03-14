@@ -46,6 +46,31 @@ export async function postEmails(body: string | null | undefined): Promise<Lambd
     };
   }
 
+  for (const r of req.recipients) {
+    if (!r.email || typeof r.email !== "string" || r.email.trim() === "") {
+      return {
+        statusCode: 400,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          error: "Each recipient must have a non-empty email field",
+        }),
+      };
+    }
+    if (
+      !r.pixel_id ||
+      typeof r.pixel_id !== "string" ||
+      r.pixel_id.trim() === ""
+    ) {
+      return {
+        statusCode: 400,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          error: "Each recipient must have a non-empty pixel_id field",
+        }),
+      };
+    }
+  }
+
   await Promise.all(
     req.recipients.map((r) =>
       putRecord({

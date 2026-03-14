@@ -165,6 +165,81 @@ describe("db helpers", () => {
 
     await updateOpens("px-5", openEvent);
     expect(mockSend).toHaveBeenCalledOnce();
+
+    const cmd = mockSend.mock.calls[0][0] as { input: Record<string, unknown> };
+    const input = cmd.input;
+
+    // Verify UpdateExpression uses list_append for atomic append semantics
+    expect(typeof input["UpdateExpression"]).toBe("string");
+    expect(input["UpdateExpression"] as string).toContain("list_append");
+
+    // Verify Key contains the pixel_id so the correct record is updated
+    expect(input["Key"]).toMatchObject({ pixel_id: "px-5" });
+
+    // Verify ExpressionAttributeValues contains the OpenEvent data
+    const eav = input["ExpressionAttributeValues"] as Record<string, unknown>;
+    const newOpenValues = Object.values(eav).find(
+      (v) => Array.isArray(v) && (v as unknown[]).length > 0
+    ) as unknown[] | undefined;
+    expect(newOpenValues).toBeDefined();
+    expect(newOpenValues?.[0]).toMatchObject({
+      timestamp: "2024-06-01T12:00:00Z",
+      ip: "1.2.3.4",
+      user_agent: "Mozilla/5.0",
+    });
+  });
+
+  it("scanRecords paginates using LastEvaluatedKey to collect all items across pages", async () => {
+    /**
+     * Verifies that scanRecords() continues scanning with ExclusiveStartKey
+     * when DynamoDB returns a LastEvaluatedKey, accumulating all items across
+     * multiple pages rather than returning only the first 1MB page.
+     *
+     * This matters because DynamoDB Scan returns at most 1MB per call. Without
+     * pagination, large tables are silently truncated and GET /emails returns an
+     * incomplete list, hiding tracked emails from the dashboard.
+     *
+     * If this contract breaks, the dashboard silently shows a subset of tracked
+     * emails and users believe emails haven't been opened when they have.
+     */
+    const page1Items: EmailTrackingRecord[] = [
+      {
+        pixel_id: "px-page1",
+        email_group_id: "g",
+        recipient: "a@b.com",
+        subject: "S",
+        sent_at: "2024-01-01T00:00:00Z",
+        opens: [],
+      },
+    ];
+    const page2Items: EmailTrackingRecord[] = [
+      {
+        pixel_id: "px-page2",
+        email_group_id: "g",
+        recipient: "c@d.com",
+        subject: "S",
+        sent_at: "2024-01-02T00:00:00Z",
+        opens: [],
+      },
+    ];
+
+    // First call returns page 1 with a LastEvaluatedKey indicating more pages exist
+    mockSend.mockResolvedValueOnce({
+      Items: page1Items,
+      LastEvaluatedKey: { pixel_id: "px-page1" },
+    });
+    // Second call returns page 2 with no LastEvaluatedKey — scan complete
+    mockSend.mockResolvedValueOnce({ Items: page2Items });
+
+    vi.resetModules();
+    const { scanRecords } = await import("../db.js");
+    const result = await scanRecords();
+
+    // Both pages must be accumulated
+    expect(result).toHaveLength(2);
+    expect(result).toEqual([...page1Items, ...page2Items]);
+    // Must have issued two separate Scan calls
+    expect(mockSend).toHaveBeenCalledTimes(2);
   });
 
   it("throws when TABLE_NAME env var is missing", async () => {

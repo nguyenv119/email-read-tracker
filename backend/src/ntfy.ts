@@ -18,9 +18,18 @@ export async function notifyOpen(
 
   const message = `Email opened by ${recipient} (pixel: ${pixelId})`;
 
-  await fetch(`https://ntfy.sh/${topic}`, {
-    method: "POST",
-    headers: { "Content-Type": "text/plain" },
-    body: message,
-  });
+  const response = await fetch(
+    `https://ntfy.sh/${encodeURIComponent(topic)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: message,
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `ntfy.sh notification failed: HTTP ${response.status}`
+    );
+  }
 }

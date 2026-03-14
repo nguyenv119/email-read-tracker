@@ -46,15 +46,28 @@ export async function getRecord(
   return result.Item as EmailTrackingRecord | undefined;
 }
 
-/** Scan the full table and return all EmailTrackingRecords. */
+/** Scan the full table and return all EmailTrackingRecords, paginating through all pages. */
 export async function scanRecords(): Promise<EmailTrackingRecord[]> {
   const tableName = getTableName();
-  const result = await docClient.send(
-    new ScanCommand({
-      TableName: tableName,
-    })
-  );
-  return (result.Items ?? []) as EmailTrackingRecord[];
+  const allItems: EmailTrackingRecord[] = [];
+  let lastEvaluatedKey: Record<string, unknown> | undefined = undefined;
+
+  do {
+    const result = await docClient.send(
+      new ScanCommand({
+        TableName: tableName,
+        ExclusiveStartKey: lastEvaluatedKey,
+      })
+    );
+    if (result.Items) {
+      allItems.push(...(result.Items as EmailTrackingRecord[]));
+    }
+    lastEvaluatedKey = result.LastEvaluatedKey as
+      | Record<string, unknown>
+      | undefined;
+  } while (lastEvaluatedKey !== undefined);
+
+  return allItems;
 }
 
 /** Append an OpenEvent to the opens list for the given pixel_id. */

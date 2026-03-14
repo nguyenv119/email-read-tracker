@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { CreateEmailRequest, EmailTrackingRecord } from "@mailtrack/shared";
+import type { LambdaUrlEvent } from "../types.js";
 
 // REVIEW: mocking core dependency — test may not reflect real behavior
 vi.mock("../db.js", () => ({
@@ -19,14 +20,6 @@ vi.mock("../pixel.js", () => ({
     "base64"
   ),
 }));
-
-type LambdaUrlEvent = {
-  rawPath: string;
-  requestContext: { http: { method: string; sourceIp?: string } };
-  headers?: Record<string, string>;
-  body?: string | null;
-  isBase64Encoded?: boolean;
-};
 
 async function callHandler(event: LambdaUrlEvent) {
   vi.resetModules();
@@ -253,7 +246,7 @@ describe("Lambda handler routing", () => {
     await handler({
       rawPath: "/emailTrack/px-side-effects",
       requestContext: { http: { method: "GET", sourceIp: "2.3.4.5" } },
-      headers: {},
+      headers: { "user-agent": "TestAgent/2.0" },
     });
 
     expect(db.updateOpens).toHaveBeenCalledOnce();
@@ -261,6 +254,71 @@ describe("Lambda handler routing", () => {
       "px-side-effects",
       "side@test.com"
     );
+
+    // Verify updateOpens is called with the correct pixelId and OpenEvent shape
+    const [calledPixelId, calledOpenEvent] = vi.mocked(db.updateOpens).mock.calls[0] as [string, { timestamp: string; ip: string; user_agent: string }];
+    expect(calledPixelId).toBe("px-side-effects");
+    expect(typeof calledOpenEvent.timestamp).toBe("string");
+    expect(calledOpenEvent.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(calledOpenEvent.ip).toBe("2.3.4.5");
+    expect(calledOpenEvent.user_agent).toBe("TestAgent/2.0");
+  });
+
+  it("POST /emails returns 400 when a recipient has an empty email field", async () => {
+    /**
+     * Verifies that POST /emails returns HTTP 400 when any recipient entry has
+     * an empty string for the email field, rather than writing a corrupt record
+     * to DynamoDB with an undefined or blank recipient.
+     *
+     * This matters because a tracking record with no recipient email cannot be
+     * attributed to anyone. The record is silently persisted and corrupts the
+     * dashboard with phantom entries.
+     *
+     * If this contract breaks, empty-email recipients get stored in DynamoDB
+     * and show as unattributable open events.
+     */
+    const { handler } = await import("../index.js");
+    const result = await handler({
+      rawPath: "/emails",
+      requestContext: { http: { method: "POST" } },
+      body: JSON.stringify({
+        email_group_id: "grp-1",
+        recipients: [{ email: "", pixel_id: "px-valid" }],
+        subject: "Hello",
+        sent_at: "2024-01-01T00:00:00Z",
+      }),
+    });
+
+    expect(result.statusCode).toBe(400);
+  });
+
+  it("POST /emails returns 400 when a recipient has an empty pixel_id field", async () => {
+    /**
+     * Verifies that POST /emails returns HTTP 400 when any recipient entry has
+     * an empty string for the pixel_id field, rather than writing a corrupt
+     * record with a blank primary key.
+     *
+     * This matters because pixel_id is the DynamoDB primary key and the URL
+     * path used to identify tracking pixels. An empty pixel_id means the
+     * tracking pixel URL is invalid and opens can never be attributed.
+     *
+     * If this contract breaks, a blank pixel_id is written as the primary key,
+     * corrupting the table and breaking open event attribution for all future
+     * requests to /emailTrack/.
+     */
+    const { handler } = await import("../index.js");
+    const result = await handler({
+      rawPath: "/emails",
+      requestContext: { http: { method: "POST" } },
+      body: JSON.stringify({
+        email_group_id: "grp-1",
+        recipients: [{ email: "valid@example.com", pixel_id: "" }],
+        subject: "Hello",
+        sent_at: "2024-01-01T00:00:00Z",
+      }),
+    });
+
+    expect(result.statusCode).toBe(400);
   });
 
   it("GET /emailTrack/{pixelId} still returns PNG when pixel_id not found in DB", async () => {
