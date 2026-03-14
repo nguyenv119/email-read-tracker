@@ -10,3 +10,4 @@ dist/
 # Dolt database files
 .dolt/
 *.db
+.beads/
