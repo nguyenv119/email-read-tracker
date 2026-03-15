@@ -18,8 +18,6 @@ const MockMutationObserver = vi.fn(function (
     capturedTarget = target;
     capturedOptions = options ?? null;
   });
-  this.disconnect = vi.fn();
-  this.takeRecords = vi.fn(() => []);
 });
 
 vi.stubGlobal("MutationObserver", MockMutationObserver);

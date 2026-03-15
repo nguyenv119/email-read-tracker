@@ -10,6 +10,7 @@ const observer = new MutationObserver((_mutations: MutationRecord[]) => {
   // TODO: detect compose window opening and inject tracking pixel
 });
 
+/** Watch all additions/removals of all subtrees of DOM */
 observer.observe(document.body, { subtree: true, childList: true });
 
 export {};
