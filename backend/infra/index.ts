@@ -1,6 +1,7 @@
 import * as aws from "@pulumi/aws";
 import * as pulumi from "@pulumi/pulumi";
 import * as path from "path";
+import { buildDynamoDbPolicy } from "./lib/policy";
 
 // DynamoDB table for email tracking records.
 // PK: pixel_id (string). PAY_PER_REQUEST billing avoids capacity planning
@@ -27,28 +28,12 @@ new aws.iam.RolePolicyAttachment("lambda-basic-execution", {
   policyArn: aws.iam.ManagedPolicy.AWSLambdaBasicExecutionRole,
 });
 
-// Inline policy granting read/write access to the tracking table.
+// Inline policy granting least-privilege access to the tracking table.
+// Only the four actions used by db.ts are included; DeleteItem and Query
+// are omitted — they are not called and granting them violates least-privilege.
 new aws.iam.RolePolicy("lambda-dynamodb-policy", {
   role: lambdaRole.id,
-  policy: table.arn.apply((arn) =>
-    JSON.stringify({
-      Version: "2012-10-17",
-      Statement: [
-        {
-          Effect: "Allow",
-          Action: [
-            "dynamodb:GetItem",
-            "dynamodb:PutItem",
-            "dynamodb:UpdateItem",
-            "dynamodb:DeleteItem",
-            "dynamodb:Scan",
-            "dynamodb:Query",
-          ],
-          Resource: arn,
-        },
-      ],
-    })
-  ),
+  policy: table.arn.apply(buildDynamoDbPolicy),
 });
 
 // Lambda function bundled from backend/dist/index.js.
