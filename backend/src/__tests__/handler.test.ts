@@ -21,28 +21,6 @@ vi.mock("../pixel.js", () => ({
   ),
 }));
 
-async function callHandler(event: LambdaUrlEvent) {
-  vi.resetModules();
-  // Re-apply mocks after reset
-  vi.mock("../db.js", () => ({
-    putRecord: vi.fn(),
-    getRecord: vi.fn(),
-    scanRecords: vi.fn(),
-    updateOpens: vi.fn(),
-  }));
-  vi.mock("../ntfy.js", () => ({
-    notifyOpen: vi.fn(),
-  }));
-  vi.mock("../pixel.js", () => ({
-    PIXEL_PNG: Buffer.from(
-      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
-      "base64"
-    ),
-  }));
-  const { handler } = await import("../index.js");
-  return handler(event);
-}
-
 describe("Lambda handler routing", () => {
   beforeEach(() => {
     process.env["TABLE_NAME"] = "test-table";
@@ -250,6 +228,7 @@ describe("Lambda handler routing", () => {
     });
 
     expect(db.updateOpens).toHaveBeenCalledOnce();
+    expect(ntfy.notifyOpen).toHaveBeenCalledOnce();
     expect(ntfy.notifyOpen).toHaveBeenCalledWith(
       "px-side-effects",
       "side@test.com"
