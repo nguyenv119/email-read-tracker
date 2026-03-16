@@ -1,4 +1,5 @@
 import { build } from "esbuild";
+import { writeFileSync } from "node:fs";
 
 await build({
   entryPoints: ["src/index.ts"],
@@ -12,5 +13,10 @@ await build({
   sourcemap: true,
   minify: false,
 });
+
+// Lambda nodejs20.x treats .js files as CJS unless a package.json with
+// "type":"module" exists in the same directory as the bundle. Write that
+// marker so the ESM bundle is loaded correctly at cold start.
+writeFileSync("dist/package.json", JSON.stringify({ type: "module" }));
 
 console.log("Build complete: dist/index.js");
