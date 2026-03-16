@@ -27,22 +27,40 @@ export function readCompose(composeEl: Element): ComposeData {
   // ── Recipients ────────────────────────────────────────────────────────────
   // Gmail represents each recipient as a chip element with an `email` attribute
   // (stable) or a `data-hovercard-id` containing the email address.
-  const chips = Array.from(
-    composeEl.querySelectorAll<HTMLElement>(
-      "[email], [data-hovercard-id]"
-    )
+  //
+  // We query all chips with those attributes, but exclude any that are inside
+  // autocomplete dropdown elements (role="listbox" or role="option") so we
+  // don't accidentally pick up suggestion items that the user hasn't confirmed.
+  const allChips = Array.from(
+    composeEl.querySelectorAll<HTMLElement>("[email], [data-hovercard-id]")
   );
 
-  const recipients = chips
-    .map((chip) => {
-      const email = chip.getAttribute("email");
-      if (email) return email;
+  const chips = allChips.filter((chip) => {
+    // Exclude chips that live inside an autocomplete dropdown
+    return !chip.closest('[role="listbox"], [role="option"]');
+  });
+
+  const seen = new Set<string>();
+  const recipients: string[] = [];
+
+  for (const chip of chips) {
+    const emailAttr = chip.getAttribute("email");
+    let address: string | null = null;
+
+    if (emailAttr) {
+      address = emailAttr;
+    } else {
       const hovercard = chip.getAttribute("data-hovercard-id") ?? "";
       // data-hovercard-id may look like "email=alice@example.com" or just the email
       const match = hovercard.match(/([^\s=]+@[^\s]+)/);
-      return match ? match[1] : null;
-    })
-    .filter((e): e is string => e !== null && e.includes("@"));
+      address = match ? match[1] : null;
+    }
+
+    if (address && address.includes("@") && !seen.has(address)) {
+      seen.add(address);
+      recipients.push(address);
+    }
+  }
 
   // ── Subject ───────────────────────────────────────────────────────────────
   // Gmail uses <input name="subjectbox"> for the subject field.

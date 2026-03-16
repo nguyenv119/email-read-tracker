@@ -17,13 +17,47 @@ import { BACKEND_URL } from "../config.js";
 
 const GMAIL_SEND_URL =
   "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
+const GMAIL_PROFILE_URL =
+  "https://gmail.googleapis.com/gmail/v1/users/me/profile";
 
 export interface SendOptions {
   token: string;
-  from: string;
   recipients: string[];
   subject: string;
   bodyHtml: string;
+}
+
+/**
+ * Encode a subject line per RFC 2047 if it contains non-ASCII characters.
+ * ASCII subjects pass through unchanged.
+ */
+function encodeSubject(subject: string): string {
+  for (let i = 0; i < subject.length; i++) {
+    if (subject.codePointAt(i)! > 127) {
+      // Wrap as =?utf-8?B?<base64>?=
+      return `=?utf-8?B?${btoa(unescape(encodeURIComponent(subject)))}?=`;
+    }
+  }
+  return subject;
+}
+
+/**
+ * Fetch the authenticated user's email address from the Gmail profile API.
+ *
+ * @throws {Error} on non-OK HTTP response
+ */
+async function getSenderEmail(token: string): Promise<string> {
+  const res = await fetch(GMAIL_PROFILE_URL, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(
+      `Gmail profile API error ${res.status}: ${JSON.stringify(detail)}`
+    );
+  }
+  const profile = (await res.json()) as { emailAddress: string };
+  return profile.emailAddress;
 }
 
 /**
@@ -38,7 +72,7 @@ function buildMime(
   return [
     `From: ${from}`,
     `To: ${to}`,
-    `Subject: ${subject}`,
+    `Subject: ${encodeSubject(subject)}`,
     "MIME-Version: 1.0",
     "Content-Type: text/html; charset=utf-8",
     "",
@@ -107,13 +141,18 @@ async function gmailSend(
  * metadata on the backend.
  */
 export async function sendTrackedEmails(opts: SendOptions): Promise<void> {
-  const { token, from, recipients, subject, bodyHtml } = opts;
+  const { token, recipients, subject, bodyHtml } = opts;
+
+  // Resolve the real sender address from the Gmail profile API so that the
+  // From: header contains an actual email address rather than the literal "me".
+  const from = await getSenderEmail(token);
 
   const email_group_id = crypto.randomUUID();
   const sent_at = new Date().toISOString();
 
   const recipientMeta: { email: string; pixel_id: string }[] = [];
   let threadId: string | undefined;
+  let sendError: unknown = undefined;
 
   for (const recipient of recipients) {
     const pixel_id = crypto.randomUUID();
@@ -122,30 +161,43 @@ export async function sendTrackedEmails(opts: SendOptions): Promise<void> {
     const mime = buildMime(from, recipient, subject, trackedBody);
     const raw = toBase64url(mime);
 
-    const result = await gmailSend(token, raw, threadId);
-    threadId = result.threadId;
-
-    recipientMeta.push({ email: recipient, pixel_id });
+    try {
+      const result = await gmailSend(token, raw, threadId);
+      threadId = result.threadId;
+      recipientMeta.push({ email: recipient, pixel_id });
+    } catch (err) {
+      sendError = err;
+      // Stop trying further recipients but still POST whatever was collected.
+      break;
+    }
   }
 
-  // Post tracking metadata to the backend
-  const payload: CreateEmailRequest = {
-    email_group_id,
-    recipients: recipientMeta,
-    subject,
-    sent_at,
-  };
+  // Post tracking metadata for all successfully-sent recipients, even if a
+  // mid-loop failure occurred, so the backend records are not lost.
+  if (recipientMeta.length > 0) {
+    const payload: CreateEmailRequest = {
+      email_group_id,
+      recipients: recipientMeta,
+      subject,
+      sent_at,
+    };
 
-  const res = await fetch(`${BACKEND_URL}/emails`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+    const res = await fetch(`${BACKEND_URL}/emails`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
 
-  if (!res.ok) {
-    const detail = await res.json().catch(() => ({}));
-    throw new Error(
-      `Backend POST /emails failed ${res.status}: ${JSON.stringify(detail)}`
-    );
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}));
+      throw new Error(
+        `Backend POST /emails failed ${res.status}: ${JSON.stringify(detail)}`
+      );
+    }
+  }
+
+  // Re-throw any Gmail send error after the backend POST so it surfaces to the caller.
+  if (sendError !== undefined) {
+    throw sendError;
   }
 }

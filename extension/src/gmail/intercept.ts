@@ -91,7 +91,6 @@ function attachSendListener(btn: HTMLButtonElement): void {
         .then((token) =>
           sendTrackedEmails({
             token,
-            from: "me", // Gmail API accepts "me" as the authenticated sender
             recipients: compose.recipients,
             subject: compose.subject,
             bodyHtml: compose.bodyHtml,

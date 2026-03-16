@@ -90,6 +90,35 @@ describe("readCompose", () => {
     expect(result.bodyHtml).toContain("<b>Bold body</b>");
   });
 
+  it("extracts recipients from data-hovercard-id chip variant", async () => {
+    /**
+     * Verifies that readCompose handles Gmail chips that use the
+     * data-hovercard-id attribute (e.g. "email=alice@example.com") instead of
+     * the plain email attribute.
+     *
+     * Gmail uses this alternate chip format in some contexts. If it is not
+     * handled, those recipients are silently dropped and never receive the
+     * tracked email.
+     *
+     * If this contract is violated, recipients added via autocomplete appear in
+     * the compose window but their copy is never sent.
+     */
+    document.body.innerHTML = `
+      <div class="compose-window">
+        <div data-testid="to-field">
+          <span data-hovercard-id="email=carol@example.com" class="recipient-chip">Carol</span>
+          <span data-hovercard-id="dave@example.com" class="recipient-chip">Dave</span>
+        </div>
+        <input name="subjectbox" value="Hello" />
+        <div class="Am Al editable" contenteditable="true"><p>Body</p></div>
+      </div>
+    `;
+    const { readCompose } = await import("../gmail/compose.js");
+    const result = readCompose(document.querySelector(".compose-window")!);
+    expect(result.recipients).toContain("carol@example.com");
+    expect(result.recipients).toContain("dave@example.com");
+  });
+
   it("returns empty recipients array when no recipient chips are found", async () => {
     /**
      * Verifies that readCompose returns an empty recipients array rather than

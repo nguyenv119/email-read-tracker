@@ -14,6 +14,21 @@ vi.stubGlobal("fetch", fetchMock);
 // Tests for send.ts
 // ---------------------------------------------------------------------------
 
+/**
+ * Default fetch handler: responds to the Gmail profile URL with a real email
+ * address, and to all other URLs with the provided response shape.
+ */
+function makeDefaultFetchMock(
+  gmailResponse: { id: string; threadId: string } = { id: "msg1", threadId: "thread1" }
+) {
+  return vi.fn(async (url: string) => {
+    if ((url as string).includes("users/me/profile")) {
+      return { ok: true, json: async () => ({ emailAddress: "sender@example.com" }) };
+    }
+    return { ok: true, json: async () => gmailResponse };
+  });
+}
+
 describe("sendTrackedEmails", () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -31,25 +46,21 @@ describe("sendTrackedEmails", () => {
      * If this contract is violated, only one email is sent (to one recipient)
      * and the others receive nothing.
      */
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => ({ id: "msg1", threadId: "thread1" }),
-    });
+    fetchMock.mockImplementation(makeDefaultFetchMock());
 
     const { sendTrackedEmails } = await import("../gmail/send.js");
     await sendTrackedEmails({
       token: "tok",
-      from: "me@example.com",
       recipients: ["a@example.com", "b@example.com"],
       subject: "Hi",
       bodyHtml: "<p>Hello</p>",
     });
 
-    // 2 Gmail API calls + 1 backend POST = 3 total
-    const gmailCalls = fetchMock.mock.calls.filter((c: unknown[]) =>
-      (c[0] as string).includes("gmail.googleapis.com")
+    // 2 Gmail send API calls (one per recipient) — profile and backend POST excluded
+    const gmailSendCalls = fetchMock.mock.calls.filter((c: unknown[]) =>
+      (c[0] as string).includes("messages/send")
     );
-    expect(gmailCalls).toHaveLength(2);
+    expect(gmailSendCalls).toHaveLength(2);
   });
 
   it("injects a unique tracking pixel into each recipient's body", async () => {
@@ -65,6 +76,9 @@ describe("sendTrackedEmails", () => {
      */
     const bodies: string[] = [];
     fetchMock.mockImplementation(async (url: string, opts: RequestInit) => {
+      if ((url as string).includes("users/me/profile")) {
+        return { ok: true, json: async () => ({ emailAddress: "sender@example.com" }) };
+      }
       if ((url as string).includes("gmail.googleapis.com")) {
         // capture raw MIME body
         const parsed = JSON.parse(opts.body as string) as { raw: string };
@@ -77,7 +91,6 @@ describe("sendTrackedEmails", () => {
     const { sendTrackedEmails } = await import("../gmail/send.js");
     await sendTrackedEmails({
       token: "tok",
-      from: "me@example.com",
       recipients: ["a@example.com"],
       subject: "Hi",
       bodyHtml: "<p>Hello</p>",
@@ -100,6 +113,9 @@ describe("sendTrackedEmails", () => {
      */
     const pixelIds: string[] = [];
     fetchMock.mockImplementation(async (url: string, opts: RequestInit) => {
+      if ((url as string).includes("users/me/profile")) {
+        return { ok: true, json: async () => ({ emailAddress: "sender@example.com" }) };
+      }
       if ((url as string).includes("gmail.googleapis.com")) {
         const parsed = JSON.parse(opts.body as string) as { raw: string };
         const mime = atob(parsed.raw.replace(/-/g, "+").replace(/_/g, "/"));
@@ -113,7 +129,6 @@ describe("sendTrackedEmails", () => {
     const { sendTrackedEmails } = await import("../gmail/send.js");
     await sendTrackedEmails({
       token: "tok",
-      from: "me@example.com",
       recipients: ["a@example.com", "b@example.com"],
       subject: "Hi",
       bodyHtml: "<p>Hello</p>",
@@ -136,6 +151,9 @@ describe("sendTrackedEmails", () => {
      */
     const requestBodies: Array<{ threadId?: string }> = [];
     fetchMock.mockImplementation(async (url: string, opts: RequestInit) => {
+      if ((url as string).includes("users/me/profile")) {
+        return { ok: true, json: async () => ({ emailAddress: "sender@example.com" }) };
+      }
       if ((url as string).includes("gmail.googleapis.com")) {
         requestBodies.push(JSON.parse(opts.body as string) as { threadId?: string });
         return {
@@ -149,7 +167,6 @@ describe("sendTrackedEmails", () => {
     const { sendTrackedEmails } = await import("../gmail/send.js");
     await sendTrackedEmails({
       token: "tok",
-      from: "me@example.com",
       recipients: ["a@example.com", "b@example.com"],
       subject: "Hi",
       bodyHtml: "<p>Hello</p>",
@@ -173,15 +190,11 @@ describe("sendTrackedEmails", () => {
      * If this contract is violated, emails are delivered but never tracked —
      * the dashboard shows nothing.
      */
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => ({ id: "m", threadId: "t" }),
-    });
+    fetchMock.mockImplementation(makeDefaultFetchMock({ id: "m", threadId: "t" }));
 
     const { sendTrackedEmails } = await import("../gmail/send.js");
     await sendTrackedEmails({
       token: "tok",
-      from: "me@example.com",
       recipients: ["a@example.com"],
       subject: "Test subject",
       bodyHtml: "<p>body</p>",
@@ -200,6 +213,40 @@ describe("sendTrackedEmails", () => {
     expect(body.recipients[0].pixel_id).toBeTruthy();
   });
 
+  it("throws when the backend POST /emails returns a non-ok response", async () => {
+    /**
+     * Verifies that sendTrackedEmails throws when the backend /emails endpoint
+     * returns an HTTP error after the Gmail sends have completed.
+     *
+     * The backend POST failure means the DynamoDB record was never created, so
+     * no opens can be tracked. Silently swallowing the error would leave the
+     * user with emails delivered but nothing visible in the dashboard.
+     *
+     * If this contract is violated, a backend outage goes unnoticed and the
+     * tracking dashboard silently drops all open events.
+     */
+    fetchMock.mockImplementation(async (url: string) => {
+      if ((url as string).includes("users/me/profile")) {
+        return { ok: true, json: async () => ({ emailAddress: "sender@example.com" }) };
+      }
+      if ((url as string).includes("gmail.googleapis.com")) {
+        return { ok: true, json: async () => ({ id: "m", threadId: "t" }) };
+      }
+      // Backend /emails endpoint returns 500
+      return { ok: false, status: 500, json: async () => ({ message: "Internal Server Error" }) };
+    });
+
+    const { sendTrackedEmails } = await import("../gmail/send.js");
+    await expect(
+      sendTrackedEmails({
+        token: "tok",
+        recipients: ["a@example.com"],
+        subject: "Hi",
+        bodyHtml: "<p>Hello</p>",
+      })
+    ).rejects.toThrow(/500/);
+  });
+
   it("throws when the gmail API returns a non-ok response", async () => {
     /**
      * Verifies that sendTrackedEmails throws (rather than silently continuing)
@@ -211,17 +258,17 @@ describe("sendTrackedEmails", () => {
      * If this contract is violated, failed sends go unnoticed and recipients
      * never receive the email.
      */
-    fetchMock.mockResolvedValue({
-      ok: false,
-      status: 401,
-      json: async () => ({ error: "Unauthorized" }),
+    fetchMock.mockImplementation(async (url: string) => {
+      if ((url as string).includes("users/me/profile")) {
+        return { ok: true, json: async () => ({ emailAddress: "sender@example.com" }) };
+      }
+      return { ok: false, status: 401, json: async () => ({ error: "Unauthorized" }) };
     });
 
     const { sendTrackedEmails } = await import("../gmail/send.js");
     await expect(
       sendTrackedEmails({
         token: "bad_tok",
-        from: "me@example.com",
         recipients: ["a@example.com"],
         subject: "Hi",
         bodyHtml: "<p>Hello</p>",

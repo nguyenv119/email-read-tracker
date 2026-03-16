@@ -53,20 +53,22 @@ describe("observeComposeWindows", () => {
     mockGetAuthToken.mockClear();
   });
 
-  it("exports an observeComposeWindows function", async () => {
+  it("exports an observeComposeWindows function that can be called without throwing", async () => {
     /**
-     * Verifies that the intercept module exports observeComposeWindows as a
-     * callable function.
+     * Verifies that the intercept module exports observeComposeWindows and that
+     * calling it does not throw.
      *
      * The content script calls observeComposeWindows() on load; if it is not
-     * exported the content script throws a TypeError immediately and the
+     * exported or throws, the content script fails to initialize and the
      * extension does nothing.
      *
      * If this contract is violated, the extension fails to initialize on every
      * Gmail page load.
      */
     const { observeComposeWindows } = await import("../gmail/intercept.js");
-    expect(typeof observeComposeWindows).toBe("function");
+    // Calling the function is the real assertion — a missing or broken export
+    // would throw a TypeError here.
+    expect(() => observeComposeWindows()).not.toThrow();
   });
 
   it("attaches click listener to send buttons in newly added compose nodes", async () => {
@@ -127,8 +129,11 @@ describe("observeComposeWindows", () => {
     // sendTrackedEmails is called asynchronously after getAuthToken resolves
     await Promise.resolve();
     await Promise.resolve();
+    // An extra tick is needed for the getAuthToken().then(...) microtask to execute
+    await Promise.resolve();
 
     expect(mockGetAuthToken).toHaveBeenCalled();
+    expect(mockSendTrackedEmails).toHaveBeenCalled();
 
     vi.stubGlobal("MutationObserver", OriginalMO);
   });

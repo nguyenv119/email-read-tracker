@@ -42,6 +42,13 @@ export function getAuthToken(): Promise<string> {
     chrome.runtime.sendMessage(
       { type: "GET_AUTH_TOKEN" },
       (response: { token?: string }) => {
+        // Must access lastError before checking response to prevent Chrome from
+        // logging an unchecked runtime error when the background returns nothing.
+        const err = chrome.runtime.lastError;
+        if (err) {
+          reject(new Error(err.message ?? "Runtime error in GET_AUTH_TOKEN"));
+          return;
+        }
         if (!response?.token) {
           reject(new Error("Failed to obtain auth token from background"));
           return;
