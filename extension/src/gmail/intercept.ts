@@ -56,9 +56,8 @@ function findComposeWindow(btn: HTMLButtonElement): Element {
     }
     el = el.parentElement;
   }
-  // Fallback: use the document so we can still read compose fields from
-  // whichever compose window is currently open.
-  return btn.closest("[role='dialog']") ?? btn.parentElement ?? document.documentElement;
+  // Fallback: no recognised ancestor found; use parentElement or document root.
+  return btn.parentElement ?? document.documentElement;
 }
 
 /**
