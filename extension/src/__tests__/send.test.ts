@@ -1,0 +1,231 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// ---------------------------------------------------------------------------
+// fetch stub
+// ---------------------------------------------------------------------------
+// REVIEW: mocking core dependency — test may not reflect real behavior
+
+const fetchMock = vi.fn();
+vi.stubGlobal("fetch", fetchMock);
+
+// crypto.randomUUID is available in jsdom/Node — no stub needed.
+
+// ---------------------------------------------------------------------------
+// Tests for send.ts
+// ---------------------------------------------------------------------------
+
+describe("sendTrackedEmails", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("calls gmail API once per recipient", async () => {
+    /**
+     * Verifies that sendTrackedEmails makes one gmail.users.messages.send
+     * call per recipient so each copy carries a unique tracking pixel.
+     *
+     * The entire point of the extension is individualized tracking — sending
+     * a single group email would make it impossible to attribute an open to a
+     * specific recipient.
+     *
+     * If this contract is violated, only one email is sent (to one recipient)
+     * and the others receive nothing.
+     */
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: "msg1", threadId: "thread1" }),
+    });
+
+    const { sendTrackedEmails } = await import("../gmail/send.js");
+    await sendTrackedEmails({
+      token: "tok",
+      from: "me@example.com",
+      recipients: ["a@example.com", "b@example.com"],
+      subject: "Hi",
+      bodyHtml: "<p>Hello</p>",
+    });
+
+    // 2 Gmail API calls + 1 backend POST = 3 total
+    const gmailCalls = fetchMock.mock.calls.filter((c: unknown[]) =>
+      (c[0] as string).includes("gmail.googleapis.com")
+    );
+    expect(gmailCalls).toHaveLength(2);
+  });
+
+  it("injects a unique tracking pixel into each recipient's body", async () => {
+    /**
+     * Verifies that the body sent to each recipient contains an <img> tag
+     * with the pixel endpoint URL so the backend can record opens.
+     *
+     * Without the pixel the backend never learns the email was opened —
+     * the extension would send email but never track anything.
+     *
+     * If this contract is violated, the extension delivers emails but
+     * the dashboard always shows zero opens.
+     */
+    const bodies: string[] = [];
+    fetchMock.mockImplementation(async (url: string, opts: RequestInit) => {
+      if ((url as string).includes("gmail.googleapis.com")) {
+        // capture raw MIME body
+        const parsed = JSON.parse(opts.body as string) as { raw: string };
+        bodies.push(atob(parsed.raw.replace(/-/g, "+").replace(/_/g, "/")));
+        return { ok: true, json: async () => ({ id: "m", threadId: "t" }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+
+    const { sendTrackedEmails } = await import("../gmail/send.js");
+    await sendTrackedEmails({
+      token: "tok",
+      from: "me@example.com",
+      recipients: ["a@example.com"],
+      subject: "Hi",
+      bodyHtml: "<p>Hello</p>",
+    });
+
+    expect(bodies[0]).toMatch(/emailTrack\//);
+    expect(bodies[0]).toMatch(/<img/);
+  });
+
+  it("each recipient gets a different pixel_id", async () => {
+    /**
+     * Verifies that pixel_ids are unique across recipients so the backend
+     * can attribute an open to the correct individual.
+     *
+     * Reusing a pixel_id across recipients would conflate opens — every open
+     * by recipient A would also appear as an open by recipient B.
+     *
+     * If this contract is violated, open attribution is entirely wrong and
+     * the tracking dashboard is unreliable.
+     */
+    const pixelIds: string[] = [];
+    fetchMock.mockImplementation(async (url: string, opts: RequestInit) => {
+      if ((url as string).includes("gmail.googleapis.com")) {
+        const parsed = JSON.parse(opts.body as string) as { raw: string };
+        const mime = atob(parsed.raw.replace(/-/g, "+").replace(/_/g, "/"));
+        const match = mime.match(/emailTrack\/([a-f0-9-]+)/i);
+        if (match) pixelIds.push(match[1]);
+        return { ok: true, json: async () => ({ id: "m", threadId: "t" }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+
+    const { sendTrackedEmails } = await import("../gmail/send.js");
+    await sendTrackedEmails({
+      token: "tok",
+      from: "me@example.com",
+      recipients: ["a@example.com", "b@example.com"],
+      subject: "Hi",
+      bodyHtml: "<p>Hello</p>",
+    });
+
+    expect(pixelIds).toHaveLength(2);
+    expect(pixelIds[0]).not.toBe(pixelIds[1]);
+  });
+
+  it("subsequent recipients reuse the threadId from the first send", async () => {
+    /**
+     * Verifies that after the first Gmail send returns a threadId, subsequent
+     * sends include that same threadId so all copies appear as one thread.
+     *
+     * Without threading, each recipient's copy becomes a separate conversation
+     * in the sender's Gmail, making sent-mail unmanageable.
+     *
+     * If this contract is violated, the sender sees N separate threads in
+     * Sent Mail instead of one grouped thread.
+     */
+    const requestBodies: Array<{ threadId?: string }> = [];
+    fetchMock.mockImplementation(async (url: string, opts: RequestInit) => {
+      if ((url as string).includes("gmail.googleapis.com")) {
+        requestBodies.push(JSON.parse(opts.body as string) as { threadId?: string });
+        return {
+          ok: true,
+          json: async () => ({ id: "m", threadId: "thread_shared" }),
+        };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+
+    const { sendTrackedEmails } = await import("../gmail/send.js");
+    await sendTrackedEmails({
+      token: "tok",
+      from: "me@example.com",
+      recipients: ["a@example.com", "b@example.com"],
+      subject: "Hi",
+      bodyHtml: "<p>Hello</p>",
+    });
+
+    // First send: no threadId (or undefined)
+    expect(requestBodies[0]?.threadId).toBeUndefined();
+    // Second send: reuses thread_shared
+    expect(requestBodies[1]?.threadId).toBe("thread_shared");
+  });
+
+  it("posts metadata to the backend after all sends succeed", async () => {
+    /**
+     * Verifies that sendTrackedEmails posts a CreateEmailRequest to the
+     * backend /emails endpoint after all Gmail API sends complete.
+     *
+     * The backend POST is what creates the DynamoDB records needed to track
+     * opens. Skipping this step means the backend has no record of the email
+     * and no open events can ever be stored.
+     *
+     * If this contract is violated, emails are delivered but never tracked —
+     * the dashboard shows nothing.
+     */
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: "m", threadId: "t" }),
+    });
+
+    const { sendTrackedEmails } = await import("../gmail/send.js");
+    await sendTrackedEmails({
+      token: "tok",
+      from: "me@example.com",
+      recipients: ["a@example.com"],
+      subject: "Test subject",
+      bodyHtml: "<p>body</p>",
+    });
+
+    const backendCall = fetchMock.mock.calls.find((c: unknown[]) =>
+      !(c[0] as string).includes("gmail.googleapis.com")
+    );
+    expect(backendCall).toBeDefined();
+    const body = JSON.parse(backendCall![1].body as string) as {
+      subject: string;
+      recipients: Array<{ email: string; pixel_id: string }>;
+    };
+    expect(body.subject).toBe("Test subject");
+    expect(body.recipients[0].email).toBe("a@example.com");
+    expect(body.recipients[0].pixel_id).toBeTruthy();
+  });
+
+  it("throws when the gmail API returns a non-ok response", async () => {
+    /**
+     * Verifies that sendTrackedEmails throws (rather than silently continuing)
+     * when the Gmail API returns an HTTP error.
+     *
+     * Swallowing a send failure would mean the user believes the email was
+     * delivered when it was not — a serious UX regression.
+     *
+     * If this contract is violated, failed sends go unnoticed and recipients
+     * never receive the email.
+     */
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: "Unauthorized" }),
+    });
+
+    const { sendTrackedEmails } = await import("../gmail/send.js");
+    await expect(
+      sendTrackedEmails({
+        token: "bad_tok",
+        from: "me@example.com",
+        recipients: ["a@example.com"],
+        subject: "Hi",
+        bodyHtml: "<p>Hello</p>",
+      })
+    ).rejects.toThrow();
+  });
+});
