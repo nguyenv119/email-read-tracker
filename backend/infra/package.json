@@ -7,7 +7,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "pulumi": "AWS_PROFILE=mail-tracker PULUMI_CONFIG_PASSPHRASE='' pulumi",
-    "deploy": "npm run pulumi -- up",
+    "deploy": "npm --prefix .. run build && npm run pulumi -- up",
     "preview": "npm run pulumi -- preview",
     "destroy": "npm run pulumi -- destroy"
   },
