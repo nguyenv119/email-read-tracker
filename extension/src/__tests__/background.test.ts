@@ -1,74 +1,59 @@
 import { describe, it, expect, vi } from "vitest";
 
-// The chrome global (including chrome.identity.getAuthToken) is installed by
-// setup.ts before this module is imported.
-// REVIEW: mocking core dependency — test may not reflect real behavior
+// Mock the auth module so this test never reaches into auth.ts internals.
+// handleMessage calls getAuthTokenInBackground — that's the direct dependency
+// we control here. chrome.identity.getAuthToken is auth.ts's problem, not ours.
+vi.mock("../gmail/auth.js", () => ({
+  getAuthTokenInBackground: vi.fn(),
+}));
 
 import { handleMessage } from "../background.js";
+import { getAuthTokenInBackground } from "../gmail/auth.js";
 
 describe("background service worker", () => {
   it("registers handleMessage as the chrome.runtime.onMessage listener on load", () => {
     /**
-     * Verifies that the background service worker registers handleMessage with
-     * chrome.runtime.onMessage when the module loads.
-     *
-     * This matters because the background script is the sole message bus
-     * between the content script and the backend API. If no listener is
-     * registered, every message from the content script is silently dropped
-     * and no tracking events are ever recorded.
+     * Verifies the background module registers handleMessage with
+     * chrome.runtime.onMessage at startup. Without this, every message from
+     * the content script is silently dropped and no tokens are ever relayed.
      */
     // GIVEN
-    const addListener = (chrome.runtime.onMessage.addListener as ReturnType<typeof vi.fn>);
+    const addListener = chrome.runtime.onMessage.addListener as ReturnType<typeof vi.fn>;
 
-    // WHEN
-    // (registration happens at module load time — we assert the outcome)
+    // WHEN (registration happens at module load — assert the outcome)
 
     // THEN
     expect(addListener).toHaveBeenCalledWith(handleMessage);
   });
 
-  it("GET_AUTH_TOKEN message fetches a token and calls sendResponse with it", async () => {
+  it("GET_AUTH_TOKEN message relays the token back via sendResponse", async () => {
     /**
-     * Verifies that handleMessage responds to { type: 'GET_AUTH_TOKEN' } by
-     * fetching an OAuth token via chrome.identity and passing it back via
-     * sendResponse.
-     *
-     * Content scripts cannot call chrome.identity.getAuthToken directly —
-     * that API is restricted to service workers. handleMessage is the only
-     * bridge. If it does not relay the token, every Gmail API call from the
-     * content script fails with a 401.
+     * Verifies handleMessage calls getAuthTokenInBackground and passes the
+     * resolved token to sendResponse. Content scripts cannot call
+     * chrome.identity directly — handleMessage is the only bridge.
+     * If it fails to relay the token, every Gmail API send fails with a 401.
      */
     // GIVEN
-    const getAuthToken = (chrome.identity.getAuthToken as ReturnType<typeof vi.fn>);
-    getAuthToken.mockImplementation(
-      (_opts: unknown, cb: (result: { token?: string }) => void) =>
-        cb({ token: "tok_relay" })
-    );
+    vi.mocked(getAuthTokenInBackground).mockResolvedValue("tok_relay");
     const sendResponse = vi.fn();
 
     // WHEN
     const result = handleMessage({ type: "GET_AUTH_TOKEN" }, {} as chrome.runtime.MessageSender, sendResponse);
-    await Promise.resolve(); // flush async getAuthTokenInBackground
+    await Promise.resolve();
 
     // THEN
-    expect(result).toBe(true); // true keeps the message channel open for async response
-    expect(getAuthToken).toHaveBeenCalled();
+    expect(result).toBe(true); // keeps the message channel open for async response
     expect(sendResponse).toHaveBeenCalledWith({ token: "tok_relay" });
   });
 
-  it("GET_AUTH_TOKEN calls sendResponse with undefined token when user is not signed in", async () => {
+  it("GET_AUTH_TOKEN calls sendResponse with undefined token when auth fails", async () => {
     /**
-     * Verifies that handleMessage still calls sendResponse when
-     * chrome.identity returns no token (user declined or not signed in).
-     *
+     * Verifies handleMessage still calls sendResponse when auth fails.
      * If sendResponse is never called, the content script's auth promise
-     * hangs forever — silently blocking every send attempt with no error shown.
+     * hangs forever — silently blocking every send attempt.
      */
     // GIVEN
-    const getAuthToken = (chrome.identity.getAuthToken as ReturnType<typeof vi.fn>);
-    getAuthToken.mockImplementation(
-      (_opts: unknown, cb: (result: { token?: string }) => void) => cb({})
-    );
+    vi.mocked(getAuthTokenInBackground).mockRejectedValue(new Error("not signed in"));
     const sendResponse = vi.fn();
 
     // WHEN
@@ -82,9 +67,9 @@ describe("background service worker", () => {
 
   it("ignores messages with an unrecognised type", () => {
     /**
-     * Verifies that handleMessage returns undefined (not true) for unknown
-     * message types, keeping the channel closed and preventing memory leaks
-     * from unclosed response channels.
+     * Verifies handleMessage returns undefined for unknown message types,
+     * keeping the channel closed and preventing memory leaks from unclosed
+     * response channels.
      */
     // GIVEN
     const sendResponse = vi.fn();
