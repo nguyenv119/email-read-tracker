@@ -1,16 +1,13 @@
 /**
  * Content script for the MailTrack Chrome extension.
  *
- * Injected into every *://mail.google.com/* page. Uses a MutationObserver
- * to watch the Gmail DOM for compose-window elements so tracking pixels can
- * be injected before the email is sent.
+ * Injected into every *://mail.google.com/* page. Uses observeComposeWindows
+ * from intercept.ts to watch the Gmail DOM for compose-window elements and
+ * intercept the send button to inject tracking pixels per recipient.
  */
 
-const observer = new MutationObserver((_mutations: MutationRecord[]) => {
-  // TODO: detect compose window opening and inject tracking pixel
-});
+import { observeComposeWindows } from "./gmail/intercept.js";
 
-/** Watch all additions/removals of all subtrees of DOM */
-observer.observe(document.body, { subtree: true, childList: true });
+observeComposeWindows();
 
 export {};

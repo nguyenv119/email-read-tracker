@@ -5,12 +5,14 @@
   "type": "module",
   "scripts": {
     "build": "esbuild src/content.ts src/background.ts --bundle --outdir=dist --platform=browser --target=chrome120",
-    "test": "vitest run"
+    "test": "vitest run",
+    "capture-fixture": "tsx playwright/capture-compose.ts"
   },
   "dependencies": {
     "@mailtrack/shared": "*"
   },
   "devDependencies": {
+    "@playwright/test": "^1.50.0",
     "@types/chrome": "^0.0.317",
     "@types/node": "^25.5.0",
     "esbuild": "^0.25.0",

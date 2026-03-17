@@ -1,97 +1,44 @@
-import { describe, it, expect, vi, beforeAll } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 // ---------------------------------------------------------------------------
-// MutationObserver stub — must be set up before the module is imported
+// Mock intercept.ts — content.ts's only direct dependency
 // ---------------------------------------------------------------------------
 // REVIEW: mocking core dependency — test may not reflect real behavior
 
-let capturedCallback: MutationCallback | null = null;
-let capturedTarget: Node | null = null;
-let capturedOptions: MutationObserverInit | null = null;
+vi.mock("../gmail/intercept.js", () => ({
+  observeComposeWindows: vi.fn(),
+}));
 
-const MockMutationObserver = vi.fn(function (
-  this: MutationObserver,
-  callback: MutationCallback
-) {
-  capturedCallback = callback;
-  this.observe = vi.fn((target: Node, options?: MutationObserverInit) => {
-    capturedTarget = target;
-    capturedOptions = options ?? null;
-  });
-});
+import { observeComposeWindows } from "../gmail/intercept.js";
 
-vi.stubGlobal("MutationObserver", MockMutationObserver);
-
-// Import the module under test after stubs are in place.
-let _module: unknown;
-beforeAll(async () => {
-  _module = await import("../content.js");
-  void _module;
-});
+// Side-effect import: loading this module calls observeComposeWindows() once.
+import "../content.js";
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe("content script", () => {
-  it("instantiates a MutationObserver on load", () => {
+  it("calls observeComposeWindows on load", () => {
     /**
-     * Verifies the content script creates a MutationObserver when the
-     * module loads.
+     * Verifies that the content script calls observeComposeWindows() exactly
+     * once when the module is first loaded.
      *
-     * The content script must observe Gmail DOM mutations to detect when a
-     * compose window appears. Without a MutationObserver the script has no
-     * way to react to Gmail's dynamic rendering and can never inject the
-     * tracking pixel.
+     * content.ts's only job is to bootstrap intercept.ts. If it does not call
+     * observeComposeWindows(), the MutationObserver is never started and the
+     * extension does nothing on Gmail pages.
      *
-     * If this contract is violated, the extension loads without errors but
-     * the compose-window injection never fires, so no pixels are added and
-     * no emails are tracked.
+     * If this contract is violated, the extension installs silently but never
+     * intercepts any send buttons — tracking is completely broken.
      */
-    expect(MockMutationObserver).toHaveBeenCalledOnce();
-  });
+    // GIVEN
+    // vi.mock above ensures observeComposeWindows is a spy; the module has
+    // already been loaded as a side-effect import above.
 
-  it("observer callback is a function", () => {
-    /**
-     * Verifies the callback passed to MutationObserver is callable.
-     *
-     * A non-function argument would cause a TypeError at runtime when the
-     * browser tries to invoke the callback on a DOM mutation, crashing the
-     * content script entirely.
-     *
-     * If this contract is violated, any Gmail DOM change throws an uncaught
-     * TypeError that kills the content script for the remainder of the tab
-     * session.
-     */
-    expect(capturedCallback).toBeTypeOf("function");
-  });
+    // WHEN
+    // Module already loaded at import time (side-effect import).
 
-  it("observer watches document.body", () => {
-    /**
-     * Verifies that observe() is called with document.body as the target.
-     *
-     * Gmail renders compose windows as children of document.body. Observing
-     * any other node (or no node) means mutations to compose windows are
-     * invisible to the script and injection never happens.
-     *
-     * If this contract is violated, the extension installs successfully but
-     * the compose-detect logic never fires, so tracking pixels are never
-     * injected.
-     */
-    expect(capturedTarget).toBe(document.body);
-  });
-
-  it("observer uses subtree mode", () => {
-    /**
-     * Verifies that observe() is called with { subtree: true }.
-     *
-     * Gmail inserts compose windows deep in the DOM hierarchy. Without
-     * subtree observation only direct children of document.body would
-     * trigger callbacks, missing all nested compose elements.
-     *
-     * If this contract is violated, compose-window events are never detected
-     * even though the observer is running, causing complete tracking failure.
-     */
-    expect(capturedOptions).toMatchObject({ subtree: true });
+    // THEN
+    expect(observeComposeWindows).toHaveBeenCalledOnce();
   });
 });
