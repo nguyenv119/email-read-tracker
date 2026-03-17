@@ -10,8 +10,8 @@
  *  4. Sends individualized tracked copies via send.ts.
  *
  * Gmail send button selectors (data attributes are stable across obfuscation):
- *  - button[data-tooltip*="Send"]  — standard compose window
- *  - button[aria-label*="Send"]    — accessibility-mode fallback
+ *  - [data-tooltip*="Send"]  — standard compose window (Gmail uses div[role="button"], not <button>)
+ *  - [aria-label*="Send"]    — accessibility-mode fallback
  */
 
 import { readCompose } from "./compose.js";
@@ -20,21 +20,23 @@ import { getAuthToken } from "./auth.js";
 
 /**
  * CSS selectors that match Gmail's send button. Listed in priority order.
+ * Note: Gmail renders send buttons as div[role="button"], not <button> elements,
+ * so these selectors intentionally omit the element-type prefix.
  */
 const SEND_BUTTON_SELECTORS = [
-  'button[data-tooltip*="Send"]',
-  'button[aria-label*="Send"]',
+  '[data-tooltip*="Send"]',
+  '[aria-label*="Send"]',
 ];
 
 /**
  * Find all send buttons within a root element.
  */
-function findSendButtons(root: Element | Document): HTMLButtonElement[] {
-  const results: HTMLButtonElement[] = [];
+function findSendButtons(root: Element | Document): HTMLElement[] {
+  const results: HTMLElement[] = [];
   for (const sel of SEND_BUTTON_SELECTORS) {
-    results.push(...Array.from(root.querySelectorAll<HTMLButtonElement>(sel)));
+    results.push(...Array.from(root.querySelectorAll<HTMLElement>(sel)));
   }
-  // De-duplicate in case a button matches multiple selectors
+  // De-duplicate in case an element matches multiple selectors
   return [...new Set(results)];
 }
 
@@ -42,7 +44,7 @@ function findSendButtons(root: Element | Document): HTMLButtonElement[] {
  * Find the compose window ancestor of a send button.
  * Falls back to the button's parentElement if no known container is found.
  */
-function findComposeWindow(btn: HTMLButtonElement): Element {
+function findComposeWindow(btn: HTMLElement): Element {
   // Walk up looking for a known compose container.
   // Gmail compose windows are typically inside a div with role="dialog"
   // or a div that contains the subjectbox input.
@@ -61,10 +63,10 @@ function findComposeWindow(btn: HTMLButtonElement): Element {
 }
 
 /**
- * Attach a send-intercept click listener to a button.
+ * Attach a send-intercept click listener to an element.
  * Idempotent: if already attached, the data attribute guard prevents double-attaching.
  */
-function attachSendListener(btn: HTMLButtonElement): void {
+function attachSendListener(btn: HTMLElement): void {
   if (btn.dataset["mailtrackAttached"] === "1") return;
   btn.dataset["mailtrackAttached"] = "1";
 
@@ -114,7 +116,7 @@ export function observeComposeWindows(): void {
         if (!(node instanceof Element)) continue;
 
         // The added node itself might be a send button
-        if (node instanceof HTMLButtonElement) {
+        if (node instanceof HTMLElement) {
           for (const sel of SEND_BUTTON_SELECTORS) {
             if (node.matches(sel)) {
               attachSendListener(node);

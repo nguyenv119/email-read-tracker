@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as fs from "fs";
+import * as path from "path";
+import { fileURLToPath } from "url";
 
 // ---------------------------------------------------------------------------
 // Stubs for MutationObserver and module dependencies
@@ -33,6 +36,14 @@ vi.mock("../gmail/auth.js", () => ({
 }));
 
 import { observeComposeWindows } from "../gmail/intercept.js";
+
+// ---------------------------------------------------------------------------
+// Fixture loading — same pattern as compose.test.ts
+// ---------------------------------------------------------------------------
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const FIXTURE_PATH = path.resolve(__dirname, "fixtures/gmail-compose.html");
+const FIXTURE_HTML: string = fs.readFileSync(FIXTURE_PATH, "utf8");
 
 // ---------------------------------------------------------------------------
 // Shared MutationObserver stub helpers
@@ -115,27 +126,30 @@ describe("observeComposeWindows", () => {
     expect(() => observeComposeWindows()).not.toThrow();
   });
 
-  it("attaches click listener to send buttons in newly added compose nodes", async () => {
+  it("attaches click listener to send buttons in newly added compose nodes from the real Gmail fixture", async () => {
     /**
-     * Verifies that observeComposeWindows detects send buttons in new DOM nodes
-     * added to the page and attaches click intercept listeners to them.
+     * Verifies that observeComposeWindows detects the real Gmail send button
+     * (a div[role="button"][data-tooltip*="Send"], not a <button>) inside a
+     * newly added compose dialog node and fires the auth + send pipeline on
+     * click.
      *
-     * Without attaching listeners the send intercept never fires, and emails
-     * are delivered without tracking pixels — the extension does nothing.
+     * Without matching div[role="button"] elements the intercept never fires
+     * in production — Gmail uses <div>, not <button>. This is a P1 bug if
+     * the selector is wrong.
      *
-     * If this contract is violated, users see their emails sent normally with
-     * no tracking, and the dashboard is always empty.
+     * If this contract is violated, users' emails are sent as untracked group
+     * emails and the dashboard is always empty.
      */
     // GIVEN
     observeComposeWindows();
     expect(capturedCallback).not.toBeNull();
 
-    const sendBtn = document.createElement("button");
-    sendBtn.setAttribute("data-tooltip", "Send \u202a(Ctrl-Enter)\u202c");
-    document.body.appendChild(sendBtn);
+    document.body.innerHTML = FIXTURE_HTML;
+    const composeDialog = document.querySelector('[role="dialog"]')! as HTMLElement;
+    const sendBtn = composeDialog.querySelector('[data-tooltip*="Send"]')! as HTMLElement;
 
-    // WHEN
-    fireMutation(sendBtn);
+    // WHEN — the MutationObserver fires with the compose dialog as the added node
+    fireMutation(composeDialog);
 
     const clickEvent = new MouseEvent("click", { bubbles: true, cancelable: true });
     sendBtn.dispatchEvent(clickEvent);
@@ -150,10 +164,11 @@ describe("observeComposeWindows", () => {
     expect(mockSendTrackedEmails).toHaveBeenCalled();
   });
 
-  it("calls preventDefault and stopImmediatePropagation on send button click", () => {
+  it("calls preventDefault and stopImmediatePropagation on the real Gmail send button click", () => {
     /**
-     * Verifies that the click handler on the send button prevents the default
-     * Gmail send action and stops other listeners from firing.
+     * Verifies that the click handler on the real Gmail send button (a
+     * div[role="button"]) prevents the default Gmail send action and stops
+     * other listeners from firing.
      *
      * Without preventDefault, Gmail sends the email immediately before the
      * per-recipient loop runs, resulting in a duplicate (untracked) send.
@@ -166,11 +181,12 @@ describe("observeComposeWindows", () => {
     // GIVEN
     observeComposeWindows();
 
-    const sendBtn = document.createElement("button");
-    sendBtn.setAttribute("data-tooltip", "Send \u202a(Ctrl-Enter)\u202c");
-    document.body.appendChild(sendBtn);
+    document.body.innerHTML = FIXTURE_HTML;
+    const composeDialog = document.querySelector('[role="dialog"]')! as HTMLElement;
+    const sendBtn = composeDialog.querySelector('[data-tooltip*="Send"]')! as HTMLElement;
 
-    fireMutation(sendBtn);
+    // Fire mutation with the compose dialog so the observer finds the send button inside it
+    fireMutation(composeDialog);
 
     // WHEN
     const clickEvent = new MouseEvent("click", { bubbles: true, cancelable: true });
