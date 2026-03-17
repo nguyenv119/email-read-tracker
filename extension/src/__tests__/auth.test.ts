@@ -17,6 +17,8 @@ vi.stubGlobal("chrome", {
   },
 });
 
+import { getAuthTokenInBackground, getAuthToken } from "../gmail/auth.js";
+
 // ---------------------------------------------------------------------------
 // Tests for auth.ts
 // ---------------------------------------------------------------------------
@@ -37,12 +39,16 @@ describe("getAuthToken (background-side wrapper)", () => {
      * If this contract is violated, every send attempt fails with a 401 and
      * no email is ever tracked.
      */
+    // GIVEN
     getAuthTokenMock.mockImplementation(
       (_opts: unknown, cb: (result: { token?: string }) => void) =>
         cb({ token: "tok_abc" })
     );
-    const { getAuthTokenInBackground } = await import("../gmail/auth.js");
+
+    // WHEN
     const token = await getAuthTokenInBackground();
+
+    // THEN
     expect(token).toBe("tok_abc");
   });
 
@@ -58,13 +64,13 @@ describe("getAuthToken (background-side wrapper)", () => {
      * If this contract is violated, the extension silently fails to send
      * tracked emails with no feedback to the user.
      */
+    // GIVEN
     getAuthTokenMock.mockImplementation(
       (_opts: unknown, cb: (result: { token?: string }) => void) => cb({})
     );
-    const { getAuthTokenInBackground } = await import("../gmail/auth.js");
-    await expect(getAuthTokenInBackground()).rejects.toThrow(
-      /auth token/i
-    );
+
+    // WHEN / THEN
+    await expect(getAuthTokenInBackground()).rejects.toThrow(/auth token/i);
   });
 });
 
@@ -86,12 +92,16 @@ describe("getAuthToken (content-script side — sends message to background)", (
      * If this contract is violated, every send attempt from a content script
      * fails with "chrome.identity is not a function" — a hard crash.
      */
+    // GIVEN
     sendMessageMock.mockImplementation(
       (_msg: unknown, cb: (resp: { token: string }) => void) =>
         cb({ token: "tok_xyz" })
     );
-    const { getAuthToken } = await import("../gmail/auth.js");
+
+    // WHEN
     const token = await getAuthToken();
+
+    // THEN
     expect(sendMessageMock).toHaveBeenCalledWith(
       { type: "GET_AUTH_TOKEN" },
       expect.any(Function)
@@ -110,10 +120,12 @@ describe("getAuthToken (content-script side — sends message to background)", (
      *
      * If this contract is violated, sends fail silently with bad auth headers.
      */
+    // GIVEN
     sendMessageMock.mockImplementation(
       (_msg: unknown, cb: (resp: Record<string, unknown>) => void) => cb({})
     );
-    const { getAuthToken } = await import("../gmail/auth.js");
+
+    // WHEN / THEN
     await expect(getAuthToken()).rejects.toThrow(/auth token/i);
   });
 });
