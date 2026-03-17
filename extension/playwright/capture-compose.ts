@@ -6,16 +6,17 @@
  *
  * ## How to run
  *
- * Step 1 — Quit Chrome completely, then relaunch it with remote debugging:
+ * Step 1 — Launch Chrome with a dedicated debug profile (NOT your real profile —
+ *   Chrome blocks remote debugging on the default profile):
  *
  *   /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
  *     --remote-debugging-port=9222 \
- *     --user-data-dir="$HOME/Library/Application Support/Google/Chrome"
+ *     --user-data-dir="$HOME/.chrome-debug-profile"
  *
- *   (Using your real profile means you're already logged into Gmail.)
+ *   First run: a fresh Chrome window opens — sign into Gmail manually.
+ *   The session is saved in ~/.chrome-debug-profile and reused on future runs.
  *
- * Step 2 — Open https://mail.google.com in that Chrome window and wait for
- *   the inbox to load.
+ * Step 2 — Wait for Gmail inbox to fully load in that Chrome window.
  *
  * Step 3 — Run this script:
  *
