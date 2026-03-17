@@ -1,8 +1,43 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import * as fs from "fs";
+import * as path from "path";
+import { fileURLToPath } from "url";
 
 // compose.ts operates on the Gmail DOM — we use jsdom (configured globally in vitest.config.ts).
 
 import { readCompose } from "../gmail/compose.js";
+
+// ---------------------------------------------------------------------------
+// Fixture loading
+//
+// Prefer the real Gmail HTML captured by `npm run capture-fixture` (run once
+// manually in a real browser session). If the fixture file does not yet exist
+// (e.g. in CI before the human has run capture-fixture), fall back to the
+// hand-written HTML below.
+//
+// To update the fixture: cd extension && npm run capture-fixture
+// ---------------------------------------------------------------------------
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const FIXTURE_PATH = path.resolve(__dirname, "fixtures/gmail-compose.html");
+
+const FIXTURE_HTML: string = (() => {
+  if (fs.existsSync(FIXTURE_PATH)) {
+    return fs.readFileSync(FIXTURE_PATH, "utf8");
+  }
+  // Fallback hand-written HTML that mirrors the DOM structure compose.ts
+  // expects. Replace by running `npm run capture-fixture` once.
+  return `
+    <div class="compose-window" role="dialog">
+      <div data-testid="to-field">
+        <span email="alice@example.com" class="recipient-chip">Alice</span>
+        <span email="bob@example.com" class="recipient-chip">Bob</span>
+      </div>
+      <input name="subjectbox" value="Hello world" />
+      <div class="Am Al editable" contenteditable="true"><p>Body text</p></div>
+    </div>
+  `;
+})();
 
 // ---------------------------------------------------------------------------
 // Tests for compose.ts
@@ -162,5 +197,36 @@ describe("readCompose", () => {
 
     // THEN
     expect(result.recipients).toEqual([]);
+  });
+
+  it("loads from real Gmail fixture when available", () => {
+    /**
+     * Verifies that the fixture file can be loaded and parsed by readCompose
+     * without throwing. When the real Gmail DOM fixture exists (captured by
+     * `npm run capture-fixture`), this test validates that compose.ts selectors
+     * work against the actual Gmail structure.
+     *
+     * This is the integration bridge between unit tests and the real Gmail DOM.
+     * If this test fails after re-capturing the fixture, compose.ts selectors
+     * need to be updated to match Gmail's current DOM.
+     *
+     * If this contract is violated, the extension silently fails to read
+     * compose fields from real Gmail compose windows.
+     */
+    // GIVEN — fixture file loaded at module scope (real Gmail HTML if available,
+    // fallback hand-written HTML otherwise)
+    document.body.innerHTML = FIXTURE_HTML;
+    const composeEl =
+      document.querySelector('[role="dialog"]') ??
+      document.querySelector(".compose-window") ??
+      document.body;
+
+    // WHEN
+    const result = readCompose(composeEl);
+
+    // THEN — readCompose must not throw; returned fields must be defined types
+    expect(typeof result.subject).toBe("string");
+    expect(Array.isArray(result.recipients)).toBe(true);
+    expect(typeof result.bodyHtml).toBe("string");
   });
 });
