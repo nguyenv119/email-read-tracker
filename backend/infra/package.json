@@ -5,7 +5,11 @@
   "main": "index.ts",
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "pulumi": "AWS_PROFILE=mail-tracker PULUMI_CONFIG_PASSPHRASE='' pulumi",
+    "deploy": "npm run pulumi -- up",
+    "preview": "npm run pulumi -- preview",
+    "destroy": "npm run pulumi -- destroy"
   },
   "dependencies": {
     "@pulumi/aws": "^6.0.0",
