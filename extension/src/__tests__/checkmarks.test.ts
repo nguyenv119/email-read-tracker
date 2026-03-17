@@ -19,24 +19,17 @@ vi.mock("../ui/poll.js", () => ({
   clearCache: vi.fn(),
 }));
 
-import type { EmailTrackingRecord } from "../../../shared/src/types.js";
-import { observeMessageList, CHECKMARK_ATTR } from "../ui/checkmarks.js";
+import { observeMessageList, CHECKMARK_ATTR, _resetObservingForTest } from "../ui/checkmarks.js";
+import { makeRecord } from "./helpers/factories.js";
+import {
+  setupMutationObserverStub,
+  teardownMutationObserverStub,
+  fireMutation,
+} from "./helpers/mutation-observer.js";
 
 // ---------------------------------------------------------------------------
-// Helpers
+// DOM helpers
 // ---------------------------------------------------------------------------
-
-function makeRecord(overrides: Partial<EmailTrackingRecord> = {}): EmailTrackingRecord {
-  return {
-    pixel_id: "px-1",
-    email_group_id: "grp-1",
-    recipient: "a@example.com",
-    subject: "Hello World",
-    sent_at: "2024-01-01T00:00:00Z",
-    opens: [],
-    ...overrides,
-  };
-}
 
 /** Build a minimal Gmail-style message row element with a subject span. */
 function makeGmailRow(subject: string): HTMLElement {
@@ -53,50 +46,6 @@ function makeGmailRow(subject: string): HTMLElement {
 }
 
 // ---------------------------------------------------------------------------
-// MutationObserver stub helpers
-// ---------------------------------------------------------------------------
-
-let capturedCallback: MutationCallback | null = null;
-let OriginalMO: typeof MutationObserver;
-
-function setupMutationObserverStub(): void {
-  capturedCallback = null;
-  OriginalMO = window.MutationObserver;
-  vi.stubGlobal(
-    "MutationObserver",
-    vi.fn(function (this: MutationObserver, cb: MutationCallback) {
-      capturedCallback = cb;
-      this.observe = vi.fn();
-      this.disconnect = vi.fn();
-      this.takeRecords = () => [];
-    })
-  );
-}
-
-function teardownMutationObserverStub(): void {
-  vi.stubGlobal("MutationObserver", OriginalMO);
-}
-
-function fireMutation(addedNode: Node): void {
-  capturedCallback!(
-    [
-      {
-        type: "childList",
-        addedNodes: [addedNode] as unknown as NodeList,
-        removedNodes: [] as unknown as NodeList,
-        target: document.body,
-        previousSibling: null,
-        nextSibling: null,
-        attributeName: null,
-        attributeNamespace: null,
-        oldValue: null,
-      } satisfies MutationRecord,
-    ],
-    {} as MutationObserver
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -104,6 +53,7 @@ describe("checkmarks.ts", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
     mockGetBySubject.mockReset();
+    _resetObservingForTest();
     setupMutationObserverStub();
   });
 
@@ -212,6 +162,64 @@ describe("checkmarks.ts", () => {
     // THEN — only one checkmark span
     const checkmarks = row.querySelectorAll(`[${CHECKMARK_ATTR}]`);
     expect(checkmarks).toHaveLength(1);
+  });
+
+  it("upgrades a single-checkmark to double-checkmark when polling detects a new open", () => {
+    /**
+     * Verifies that a row already decorated with ✓ is upgraded to ✓✓ when
+     * a subsequent poll returns an open event for the same subject.
+     *
+     * Without this upgrade, polling refreshes the cache but the UI never
+     * reflects new opens — users see ✓ forever even after the recipient reads
+     * the email.
+     *
+     * If this contract is violated, checkmarks are frozen at their initial
+     * state and the "read" signal (✓✓) is never shown after page load.
+     */
+    // GIVEN — first mutation shows no opens (✓)
+    mockGetBySubject.mockReturnValue([makeRecord({ opens: [] })]);
+    observeMessageList();
+    const row = makeGmailRow("Hello World");
+    fireMutation(row);
+    const checkmark = row.querySelector(`[${CHECKMARK_ATTR}]`)!;
+    expect(checkmark.textContent).toBe("✓");
+
+    // WHEN — cache now has an open; fire mutation again on the same row
+    mockGetBySubject.mockReturnValue([
+      makeRecord({
+        opens: [{ timestamp: "2024-01-02T00:00:00Z", ip: "1.2.3.4", user_agent: "Mozilla" }],
+      }),
+    ]);
+    fireMutation(row);
+
+    // THEN — the existing checkmark is updated to ✓✓, still only one span
+    const checkmarks = row.querySelectorAll(`[${CHECKMARK_ATTR}]`);
+    expect(checkmarks).toHaveLength(1);
+    expect(checkmarks[0].textContent).toBe("✓✓");
+  });
+
+  it("does not add a second MutationObserver when observeMessageList is called twice", () => {
+    /**
+     * Verifies that calling observeMessageList() more than once is a no-op —
+     * only a single MutationObserver is ever created.
+     *
+     * Each extra observer fires on every DOM mutation, so N calls create N
+     * redundant processing passes and N redundant checkmarks per row.
+     *
+     * If this contract is violated, content.ts accidentally calling
+     * observeMessageList() twice causes every injection to run twice,
+     * duplicating checkmarks and degrading Gmail performance.
+     */
+    // GIVEN
+    observeMessageList();
+
+    // WHEN — call again
+    const MOSpy = vi.mocked(MutationObserver);
+    const callsBefore = MOSpy.mock.calls.length;
+    observeMessageList();
+
+    // THEN — no additional MutationObserver was constructed
+    expect(MOSpy.mock.calls.length).toBe(callsBefore);
   });
 
   it("uses the most-open record when multiple records share the same subject", () => {

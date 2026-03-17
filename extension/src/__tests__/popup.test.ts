@@ -2,22 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import type { EmailTrackingRecord } from "../../../shared/src/types.js";
 import { showPopup, hidePopup, POPUP_ID } from "../ui/popup.js";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function makeRecord(overrides: Partial<EmailTrackingRecord> = {}): EmailTrackingRecord {
-  return {
-    pixel_id: "px-1",
-    email_group_id: "grp-1",
-    recipient: "a@example.com",
-    subject: "Hello World",
-    sent_at: "2024-01-01T00:00:00Z",
-    opens: [],
-    ...overrides,
-  };
-}
+import { makeRecord } from "./helpers/factories.js";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -83,7 +68,7 @@ describe("popup.ts", () => {
   it("showPopup renders open count for a recipient with opens", () => {
     /**
      * Verifies that a recipient who has opened the email shows a non-zero
-     * open count in the popup.
+     * open count in the popup as a specific "N opens" label.
      *
      * Open count is a core data point — users need to know how many times
      * each recipient opened their email.
@@ -107,14 +92,14 @@ describe("popup.ts", () => {
 
     // THEN
     const popup = document.getElementById(POPUP_ID)!;
-    // Should show count 2 somewhere near the recipient
-    expect(popup.textContent).toMatch(/2/);
+    expect(popup.textContent).toContain("2 opens");
   });
 
   it("showPopup renders first and last open timestamps for a recipient with opens", () => {
     /**
      * Verifies that the popup shows both the first and last open timestamp
-     * for a recipient with multiple opens.
+     * for a recipient with multiple opens, with each timestamp distinguishable
+     * by its formatted date string.
      *
      * Users need temporal context to understand reading patterns (e.g., "read
      * it right away vs. a day later"). Without timestamps the open count is
@@ -123,7 +108,7 @@ describe("popup.ts", () => {
      * If this contract is violated, users see an open count but no dates,
      * reducing the usefulness of the tracking data.
      */
-    // GIVEN
+    // GIVEN — two timestamps on different days, formatted via toLocaleString()
     const record = makeRecord({
       opens: [
         { timestamp: "2024-01-02T10:00:00Z", ip: "1.2.3.4", user_agent: "Chrome" },
@@ -132,13 +117,16 @@ describe("popup.ts", () => {
     });
     const anchor = document.createElement("span");
     document.body.appendChild(anchor);
+    const firstFormatted = new Date("2024-01-02T10:00:00Z").toLocaleString();
+    const lastFormatted = new Date("2024-01-05T15:30:00Z").toLocaleString();
 
     // WHEN
     showPopup([record], anchor);
 
-    // THEN — both timestamps should appear somewhere in the popup text
+    // THEN — both formatted timestamps appear in popup text
     const popup = document.getElementById(POPUP_ID)!;
-    expect(popup.textContent).toContain("2024");
+    expect(popup.textContent).toContain(firstFormatted);
+    expect(popup.textContent).toContain(lastFormatted);
   });
 
   it("showPopup renders user agent for a recipient with opens", () => {
@@ -205,6 +193,68 @@ describe("popup.ts", () => {
 
     // WHEN / THEN
     expect(() => hidePopup()).not.toThrow();
+  });
+
+  it("showPopup renders attacker-controlled user_agent as text, not injected HTML", () => {
+    /**
+     * Verifies that a user_agent value containing HTML tags is rendered as
+     * literal text, not interpreted as markup.
+     *
+     * user_agent comes from HTTP headers and is fully attacker-controlled.
+     * If interpolated via innerHTML, a crafted user_agent like
+     * '<img src=x onerror=alert(1)>' would execute arbitrary JavaScript in
+     * the extension's content-script context, which has access to the Gmail
+     * DOM and chrome.storage.
+     *
+     * If this contract is violated, an email recipient (the opener) can craft
+     * their HTTP headers to inject and execute scripts inside the sender's
+     * Gmail tab.
+     */
+    // GIVEN — user_agent containing a script injection attempt
+    const maliciousUa = '<img src=x onerror="alert(1)">';
+    const record = makeRecord({
+      opens: [
+        { timestamp: "2024-01-02T10:00:00Z", ip: "1.2.3.4", user_agent: maliciousUa },
+      ],
+    });
+    const anchor = document.createElement("span");
+    document.body.appendChild(anchor);
+
+    // WHEN
+    showPopup([record], anchor);
+
+    // THEN — the raw HTML tag appears as text, no img element was created
+    const popup = document.getElementById(POPUP_ID)!;
+    expect(popup.textContent).toContain(maliciousUa);
+    expect(popup.querySelector("img")).toBeNull();
+  });
+
+  it("showPopup renders attacker-controlled recipient as text, not injected HTML", () => {
+    /**
+     * Verifies that a recipient address containing HTML tags is rendered as
+     * literal text, not interpreted as markup.
+     *
+     * While recipient is set by the sender, defense-in-depth requires all
+     * displayed user data to be escaped. Any field stored in the backend and
+     * later re-rendered must be treated as untrusted.
+     *
+     * If this contract is violated, a specially crafted recipient string could
+     * inject HTML into the popup, breaking the display or executing scripts.
+     */
+    // GIVEN — recipient containing an HTML injection attempt
+    const maliciousRecipient = '<b onmouseover="alert(1)">evil@example.com</b>';
+    const record = makeRecord({ recipient: maliciousRecipient });
+    const anchor = document.createElement("span");
+    document.body.appendChild(anchor);
+
+    // WHEN
+    showPopup([record], anchor);
+
+    // THEN — the raw HTML tag appears as text, no bold element was created inside the popup row
+    const popup = document.getElementById(POPUP_ID)!;
+    expect(popup.textContent).toContain(maliciousRecipient);
+    // No injected <b> element should appear as a real DOM node inside the popup
+    expect(popup.querySelector("b")).toBeNull();
   });
 
   it("showPopup replaces an existing popup rather than creating a second one", () => {

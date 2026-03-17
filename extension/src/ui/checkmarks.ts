@@ -6,6 +6,10 @@
  * extracts the subject text, looks up tracking records via getBySubject(), and
  * injects a ✓ or ✓✓ span next to the subject.
  *
+ * When a row is re-processed (e.g., after polling refreshes the cache), any
+ * existing checkmark span is updated in-place rather than re-injected, so that
+ * ✓ rows can be upgraded to ✓✓ without accumulating duplicate spans.
+ *
  * Matching strategy: subject text, because it is the only field present in both
  * the tracking data and the Gmail list-view DOM.
  */
@@ -25,6 +29,19 @@ export const CHECKMARK_ATTR = "data-mailtrack-checkmark";
  * message list. This selector targets it within a row.
  */
 const SUBJECT_SELECTOR = "span.bog";
+
+/** Module-level guard: true once observeMessageList() has been called. */
+let observing = false;
+
+/**
+ * Reset the observing guard. Exposed for tests only — allows each test to call
+ * observeMessageList() as if it were the first call.
+ *
+ * @internal
+ */
+export function _resetObservingForTest(): void {
+  observing = false;
+}
 
 /**
  * Extract the plain-text subject from a Gmail message-list row element.
@@ -69,7 +86,12 @@ function injectCheckmark(row: Element, records: EmailTrackingRecord[]): void {
 
 /**
  * Process a single DOM node: if it is (or contains) Gmail message-list rows,
- * inject checkmarks for any tracked subjects.
+ * inject or update checkmarks for any tracked subjects.
+ *
+ * For rows that already have a checkmark span, re-checks the current tracking
+ * state and updates the span text/class if the status changed (✓ → ✓✓).
+ * Only skips a row entirely when the existing checkmark already matches the
+ * current state.
  */
 function processNode(node: Node): void {
   if (!(node instanceof Element)) return;
@@ -83,25 +105,35 @@ function processNode(node: Node): void {
   }
 
   for (const row of rows) {
-    // Skip rows already decorated.
-    if (row.querySelector(`[${CHECKMARK_ATTR}]`)) continue;
-
     const subject = extractSubject(row);
     if (!subject) continue;
 
     const records = getBySubject(subject);
     if (records.length === 0) continue;
 
-    injectCheckmark(row, records);
+    const desired = checkmarkText(records);
+    const existing = row.querySelector<HTMLElement>(`[${CHECKMARK_ATTR}]`);
+
+    if (existing) {
+      // Row already decorated — update in place only if the status changed.
+      if (existing.textContent !== desired) {
+        existing.textContent = desired;
+      }
+    } else {
+      injectCheckmark(row, records);
+    }
   }
 }
 
 /**
  * Start a MutationObserver on document.body that processes newly added nodes.
- * Safe to call multiple times — each call creates a separate observer, so
- * content.ts should call it only once.
+ * Safe to call multiple times — subsequent calls after the first are no-ops,
+ * preventing observer leaks on re-navigation.
  */
 export function observeMessageList(): void {
+  if (observing) return;
+  observing = true;
+
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
       for (const node of Array.from(mutation.addedNodes)) {

@@ -8,7 +8,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const fetchMock = vi.fn();
 vi.stubGlobal("fetch", fetchMock);
 
-import type { EmailTrackingRecord } from "../../../shared/src/types.js";
 import {
   startPolling,
   stopPolling,
@@ -17,22 +16,7 @@ import {
   getBySubject,
   POLL_INTERVAL_MS,
 } from "../ui/poll.js";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function makeRecord(overrides: Partial<EmailTrackingRecord> = {}): EmailTrackingRecord {
-  return {
-    pixel_id: "px-1",
-    email_group_id: "grp-1",
-    recipient: "a@example.com",
-    subject: "Hello World",
-    sent_at: "2024-01-01T00:00:00Z",
-    opens: [],
-    ...overrides,
-  };
-}
+import { makeRecord } from "./helpers/factories.js";
 
 // ---------------------------------------------------------------------------
 // Tests
