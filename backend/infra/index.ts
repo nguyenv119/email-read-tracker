@@ -59,5 +59,13 @@ const functionUrl = new aws.lambda.FunctionUrl("email-tracker-url", {
   authorizationType: "NONE",
 });
 
+// Public access requires both InvokeFunction and InvokeFunctionUrl permissions.
+// Without InvokeFunction, the Function URL returns 403 even with auth type NONE.
+new aws.lambda.Permission("function-url-public-access", {
+  function: lambda.name,
+  action: "lambda:InvokeFunction",
+  principal: "*",
+});
+
 // Stack output consumed by downstream stacks and the extension config.
 export const url = functionUrl.functionUrl;
