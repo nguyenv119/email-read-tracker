@@ -1,21 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// ---------------------------------------------------------------------------
-// chrome API stub
-// ---------------------------------------------------------------------------
 // REVIEW: mocking core dependency — test may not reflect real behavior
-
-const getAuthTokenMock = vi.fn();
-const sendMessageMock = vi.fn();
-
-vi.stubGlobal("chrome", {
-  identity: {
-    getAuthToken: getAuthTokenMock,
-  },
-  runtime: {
-    sendMessage: sendMessageMock,
-  },
-});
+// chrome global is stubbed in setup.ts (the single authoritative stub).
+// Each test configures its own behaviour via vi.mocked() in the GIVEN section.
 
 import { getAuthTokenInBackground, getAuthToken } from "../gmail/auth.js";
 
@@ -40,7 +27,7 @@ describe("getAuthToken (background-side wrapper)", () => {
      * no email is ever tracked.
      */
     // GIVEN
-    getAuthTokenMock.mockImplementation(
+    vi.mocked(chrome.identity.getAuthToken).mockImplementation(
       (_opts: unknown, cb: (result: { token?: string }) => void) =>
         cb({ token: "tok_abc" })
     );
@@ -65,7 +52,7 @@ describe("getAuthToken (background-side wrapper)", () => {
      * tracked emails with no feedback to the user.
      */
     // GIVEN
-    getAuthTokenMock.mockImplementation(
+    vi.mocked(chrome.identity.getAuthToken).mockImplementation(
       (_opts: unknown, cb: (result: { token?: string }) => void) => cb({})
     );
 
@@ -93,7 +80,7 @@ describe("getAuthToken (content-script side — sends message to background)", (
      * fails with "chrome.identity is not a function" — a hard crash.
      */
     // GIVEN
-    sendMessageMock.mockImplementation(
+    vi.mocked(chrome.runtime.sendMessage).mockImplementation(
       (_msg: unknown, cb: (resp: { token: string }) => void) =>
         cb({ token: "tok_xyz" })
     );
@@ -102,7 +89,7 @@ describe("getAuthToken (content-script side — sends message to background)", (
     const token = await getAuthToken();
 
     // THEN
-    expect(sendMessageMock).toHaveBeenCalledWith(
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
       { type: "GET_AUTH_TOKEN" },
       expect.any(Function)
     );
@@ -121,7 +108,7 @@ describe("getAuthToken (content-script side — sends message to background)", (
      * If this contract is violated, sends fail silently with bad auth headers.
      */
     // GIVEN
-    sendMessageMock.mockImplementation(
+    vi.mocked(chrome.runtime.sendMessage).mockImplementation(
       (_msg: unknown, cb: (resp: Record<string, unknown>) => void) => cb({})
     );
 

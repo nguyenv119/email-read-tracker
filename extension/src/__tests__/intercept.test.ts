@@ -1,21 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ---------------------------------------------------------------------------
-// Stubs for chrome, MutationObserver, and dependencies
+// Stubs for MutationObserver and module dependencies
 // ---------------------------------------------------------------------------
 // REVIEW: mocking core dependency — test may not reflect real behavior
-
-vi.stubGlobal("chrome", {
-  runtime: {
-    sendMessage: vi.fn().mockImplementation(
-      (_msg: unknown, cb: (resp: { token: string }) => void) =>
-        cb({ token: "tok_mock" })
-    ),
-  },
-  identity: {
-    getAuthToken: vi.fn(),
-  },
-});
+// chrome global is stubbed in setup.ts (single authoritative stub).
+// auth.js is fully mocked below, so chrome.identity / chrome.runtime.sendMessage
+// are never called directly in these tests.
 
 // Use vi.hoisted so these mocks are available when vi.mock factories run.
 const { mockReadCompose, mockSendTrackedEmails, mockGetAuthToken } = vi.hoisted(() => ({

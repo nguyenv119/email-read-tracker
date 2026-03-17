@@ -5,19 +5,24 @@
  * chrome global is in place when background.ts is first evaluated. A stub
  * placed inside a test body arrives too late because static imports resolve
  * before any test-body code runs.
+ *
+ * This is the single authoritative chrome stub for the entire suite.
+ * Individual tests configure specific mock behaviour via:
+ *   vi.mocked(chrome.identity.getAuthToken).mockImplementation(...)
+ *   vi.mocked(chrome.runtime.sendMessage).mockImplementation(...)
+ * and reset it in beforeEach(() => vi.resetAllMocks()).
  */
 
 import { vi } from "vitest";
-
-const getAuthTokenMock = vi.fn();
 
 vi.stubGlobal("chrome", {
   runtime: {
     onMessage: {
       addListener: vi.fn(),
     },
+    sendMessage: vi.fn(),
   },
   identity: {
-    getAuthToken: getAuthTokenMock,
+    getAuthToken: vi.fn(),
   },
 });
