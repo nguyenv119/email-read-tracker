@@ -8,27 +8,25 @@
 
 import { getAuthTokenInBackground } from "./gmail/auth.js";
 
-chrome.runtime.onMessage.addListener(
-  (
-    message: unknown,
-    _sender: chrome.runtime.MessageSender, /** Which Gmail tab */
-    sendResponse: (response?: unknown) => void
-  ): boolean | undefined => {
-    if (
-      typeof message === "object" &&
-      message !== null &&
-      (message as { type?: string }).type === "GET_AUTH_TOKEN"
-    ) {
-      // chrome.identity.getAuthToken is only available in the service worker.
-      // We relay the token back to the content script via sendResponse.
-      getAuthTokenInBackground()
-        .then((token) => sendResponse({ token }))
-        .catch(() => sendResponse({ token: undefined }));
+export function handleMessage(
+  message: unknown,
+  _sender: chrome.runtime.MessageSender,
+  sendResponse: (response?: unknown) => void
+): boolean | undefined {
+  if (
+    typeof message === "object" &&
+    message !== null &&
+    (message as { type?: string }).type === "GET_AUTH_TOKEN"
+  ) {
+    // chrome.identity.getAuthToken is only available in the service worker.
+    // We relay the token back to the content script via sendResponse.
+    getAuthTokenInBackground()
+      .then((token) => sendResponse({ token }))
+      .catch(() => sendResponse({ token: undefined }));
 
-      // Return true to keep the message channel open for the async response.
-      return true;
-    }
+    // Return true to keep the message channel open for the async response.
+    return true;
   }
-);
+}
 
-export {};
+chrome.runtime.onMessage.addListener(handleMessage);

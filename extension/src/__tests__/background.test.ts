@@ -1,145 +1,99 @@
-import { describe, it, expect, vi, beforeAll } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
-// ---------------------------------------------------------------------------
-// chrome API stub — must be set up before the module is imported
-// ---------------------------------------------------------------------------
+// The chrome global (including chrome.identity.getAuthToken) is installed by
+// setup.ts before this module is imported.
 // REVIEW: mocking core dependency — test may not reflect real behavior
 
-const getAuthTokenMock = vi.fn();
-
-const chromeMock = {
-  runtime: {
-    onMessage: {
-      addListener: vi.fn(),
-    },
-  },
-  identity: {
-    getAuthToken: getAuthTokenMock,
-  },
-};
-
-vi.stubGlobal("chrome", chromeMock);
-
-// Import the module under test after the stub is in place.
-// The module executes its top-level side effects (addListener call) on import.
-// We use a dynamic import inside beforeAll so the stub is active first.
-let _module: unknown;
-beforeAll(async () => {
-  _module = await import("../background.js");
-  void _module;
-});
-
-// Helper to retrieve the registered listener from the mock.
-function getListener(): (
-  msg: unknown,
-  sender: unknown,
-  sendResponse: (r: unknown) => void
-) => boolean | undefined {
-  return (
-    chromeMock.runtime.onMessage.addListener as ReturnType<typeof vi.fn>
-  ).mock.calls[0][0] as (
-    msg: unknown,
-    sender: unknown,
-    sendResponse: (r: unknown) => void
-  ) => boolean | undefined;
-}
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+import { handleMessage } from "../background.js";
 
 describe("background service worker", () => {
-  it("registers a chrome.runtime.onMessage listener on load", () => {
+  it("registers handleMessage as the chrome.runtime.onMessage listener on load", () => {
     /**
-     * Verifies that the background service worker registers exactly one
-     * chrome.runtime.onMessage listener when the module is loaded.
+     * Verifies that the background service worker registers handleMessage with
+     * chrome.runtime.onMessage when the module loads.
      *
      * This matters because the background script is the sole message bus
      * between the content script and the backend API. If no listener is
      * registered, every message from the content script is silently dropped
-     * and no tracking events are ever forwarded.
-     *
-     * If this contract is violated, users would send emails but no open
-     * events would ever be recorded — tracking would be completely broken
-     * with no visible error.
+     * and no tracking events are ever recorded.
      */
-    expect(chromeMock.runtime.onMessage.addListener).toHaveBeenCalledOnce();
+    // GIVEN
+    const addListener = (chrome.runtime.onMessage.addListener as ReturnType<typeof vi.fn>);
+
+    // WHEN
+    // (registration happens at module load time — we assert the outcome)
+
+    // THEN
+    expect(addListener).toHaveBeenCalledWith(handleMessage);
   });
 
-  it("listener is a function", () => {
+  it("GET_AUTH_TOKEN message fetches a token and calls sendResponse with it", async () => {
     /**
-     * Verifies the value passed to addListener is callable.
-     *
-     * chrome.runtime.onMessage.addListener silently discards non-function
-     * arguments in some environments, meaning a mis-typed handler would
-     * register nothing and all messages would be lost.
-     *
-     * If this contract is violated, the extension appears to load correctly
-     * (no console errors) but never responds to any content-script message.
-     */
-    expect(chromeMock.runtime.onMessage.addListener).toHaveBeenCalledWith(
-      expect.any(Function)
-    );
-  });
-
-  it("GET_AUTH_TOKEN message triggers chrome.identity.getAuthToken and calls sendResponse with token", async () => {
-    /**
-     * Verifies that the message handler responds to { type: 'GET_AUTH_TOKEN' }
-     * by calling chrome.identity.getAuthToken and passing { token } back via
+     * Verifies that handleMessage responds to { type: 'GET_AUTH_TOKEN' } by
+     * fetching an OAuth token via chrome.identity and passing it back via
      * sendResponse.
      *
      * Content scripts cannot call chrome.identity.getAuthToken directly —
-     * that API is restricted to service workers. The background handler is the
-     * only bridge. If it does not relay the token, every auth attempt from a
-     * content script fails with a hard crash.
-     *
-     * If this contract is violated, no OAuth token is ever obtained from a
-     * content script context and every Gmail API send fails with a 401.
+     * that API is restricted to service workers. handleMessage is the only
+     * bridge. If it does not relay the token, every Gmail API call from the
+     * content script fails with a 401.
      */
-    getAuthTokenMock.mockImplementation(
+    // GIVEN
+    const getAuthToken = (chrome.identity.getAuthToken as ReturnType<typeof vi.fn>);
+    getAuthToken.mockImplementation(
       (_opts: unknown, cb: (result: { token?: string }) => void) =>
         cb({ token: "tok_relay" })
     );
-
-    const listener = getListener();
     const sendResponse = vi.fn();
-    const result = listener({ type: "GET_AUTH_TOKEN" }, {}, sendResponse);
 
-    // The handler must return true to keep the message channel open for async responses
-    expect(result).toBe(true);
+    // WHEN
+    const result = handleMessage({ type: "GET_AUTH_TOKEN" }, {} as chrome.runtime.MessageSender, sendResponse);
+    await Promise.resolve(); // flush async getAuthTokenInBackground
 
-    // Flush the microtask queue so the async getAuthTokenInBackground Promise resolves
-    await Promise.resolve();
-
-    expect(getAuthTokenMock).toHaveBeenCalled();
+    // THEN
+    expect(result).toBe(true); // true keeps the message channel open for async response
+    expect(getAuthToken).toHaveBeenCalled();
     expect(sendResponse).toHaveBeenCalledWith({ token: "tok_relay" });
   });
 
-  it("GET_AUTH_TOKEN sends empty token when chrome.identity returns undefined", async () => {
+  it("GET_AUTH_TOKEN calls sendResponse with undefined token when user is not signed in", async () => {
     /**
-     * Verifies that when chrome.identity.getAuthToken returns undefined
-     * (user declined or not signed in), the background still calls sendResponse
-     * with { token: undefined } rather than hanging the channel.
+     * Verifies that handleMessage still calls sendResponse when
+     * chrome.identity returns no token (user declined or not signed in).
      *
-     * If sendResponse is never called, the content script's callback never
-     * fires and the auth promise never resolves or rejects — causing a silent
-     * hang on every send attempt.
-     *
-     * If this contract is violated, auth failures leave the content script
-     * in a permanently suspended state with no error shown.
+     * If sendResponse is never called, the content script's auth promise
+     * hangs forever — silently blocking every send attempt with no error shown.
      */
-    getAuthTokenMock.mockImplementation(
+    // GIVEN
+    const getAuthToken = (chrome.identity.getAuthToken as ReturnType<typeof vi.fn>);
+    getAuthToken.mockImplementation(
       (_opts: unknown, cb: (result: { token?: string }) => void) => cb({})
     );
-
-    const listener = getListener();
     const sendResponse = vi.fn();
-    listener({ type: "GET_AUTH_TOKEN" }, {}, sendResponse);
 
-    // Flush microtasks: the handler rejects -> .catch -> sendResponse
+    // WHEN
+    handleMessage({ type: "GET_AUTH_TOKEN" }, {} as chrome.runtime.MessageSender, sendResponse);
     await Promise.resolve();
-    await Promise.resolve(); // two ticks: one for rejection, one for catch handler
+    await Promise.resolve(); // two ticks: rejection + catch handler
 
+    // THEN
     expect(sendResponse).toHaveBeenCalledWith({ token: undefined });
+  });
+
+  it("ignores messages with an unrecognised type", () => {
+    /**
+     * Verifies that handleMessage returns undefined (not true) for unknown
+     * message types, keeping the channel closed and preventing memory leaks
+     * from unclosed response channels.
+     */
+    // GIVEN
+    const sendResponse = vi.fn();
+
+    // WHEN
+    const result = handleMessage({ type: "UNKNOWN" }, {} as chrome.runtime.MessageSender, sendResponse);
+
+    // THEN
+    expect(result).toBeUndefined();
+    expect(sendResponse).not.toHaveBeenCalled();
   });
 });
