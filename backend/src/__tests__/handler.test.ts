@@ -403,6 +403,10 @@ describe("Lambda handler routing", () => {
     // THEN
     expect(result.statusCode).toBe(200);
     expect(result.headers?.["Access-Control-Allow-Origin"]).toBe("https://mail.google.com");
+    expect(result.headers?.["Access-Control-Allow-Methods"]).toContain("GET");
+    expect(result.headers?.["Access-Control-Allow-Methods"]).toContain("POST");
+    expect(result.headers?.["Access-Control-Allow-Methods"]).toContain("OPTIONS");
+    expect(result.headers?.["Access-Control-Allow-Headers"]).toContain("Content-Type");
   });
 
   it("GET /emails response includes Access-Control-Allow-Origin header", async () => {
@@ -418,6 +422,7 @@ describe("Lambda handler routing", () => {
      * If this contract breaks, the preflight passes but the browser still
      * rejects the response, leaving the tracking dashboard empty.
      */
+    // GIVEN
     const db = await import("../db.js");
     vi.mocked(db.scanRecords).mockResolvedValue([]);
 
@@ -433,19 +438,23 @@ describe("Lambda handler routing", () => {
     expect(result.headers?.["Access-Control-Allow-Origin"]).toBe("https://mail.google.com");
   });
 
-  it("POST /emails response includes Access-Control-Allow-Origin header", async () => {
+  it("POST /emails response includes Access-Control-Allow-Origin header and preserves Content-Type", async () => {
     /**
      * Verifies that every POST /emails response carries the
-     * Access-Control-Allow-Origin header alongside route-specific headers.
+     * Access-Control-Allow-Origin header alongside route-specific headers,
+     * and that the route's Content-Type header is not overwritten by the
+     * CORS header merge.
      *
      * This matters because browsers verify the CORS header on actual responses
      * in addition to preflights. A missing header on the POST response means
      * the browser blocks the reply and the extension cannot confirm that
-     * tracking pixels were successfully registered.
+     * tracking pixels were successfully registered. Overwriting Content-Type
+     * would break response parsing for callers.
      *
      * If this contract breaks, POST requests appear to succeed server-side
      * but the extension sees a network error and cannot update its UI.
      */
+    // GIVEN
     const db = await import("../db.js");
     vi.mocked(db.putRecord).mockResolvedValue(undefined);
 
@@ -467,5 +476,37 @@ describe("Lambda handler routing", () => {
     expect(result.headers?.["Access-Control-Allow-Origin"]).toBe("https://mail.google.com");
     // Route-specific headers must be preserved alongside CORS headers
     expect(result.headers?.["Content-Type"]).toBe("application/json");
+  });
+
+  it("GET /emailTrack/{pixelId} actual response includes Access-Control-Allow-Origin header", async () => {
+    /**
+     * Verifies that the actual GET /emailTrack/{pixelId} response (not just the
+     * OPTIONS preflight) carries the Access-Control-Allow-Origin header.
+     *
+     * This matters because CORS requires the origin header on the real response
+     * too, not just the preflight. Without it, the browser blocks the pixel
+     * image even when the preflight succeeded, causing open events to be missed.
+     *
+     * If this contract breaks, the CORS merge is removed from the emailTrack
+     * path in index.ts and the browser blocks the pixel fetch silently.
+     */
+    // GIVEN
+    const db = await import("../db.js");
+    vi.mocked(db.getRecord).mockResolvedValue(undefined);
+
+    const { handler } = await import("../index.js");
+
+    // WHEN
+    const result = await handler({
+      rawPath: "/emailTrack/px-cors-test",
+      requestContext: { http: { method: "GET" } },
+      headers: {},
+    });
+
+    // THEN
+    expect(result.statusCode).toBe(200);
+    expect(result.headers?.["Access-Control-Allow-Origin"]).toBe("https://mail.google.com");
+    // Route-specific image/png header must be preserved alongside CORS headers
+    expect(result.headers?.["Content-Type"]).toBe("image/png");
   });
 });
