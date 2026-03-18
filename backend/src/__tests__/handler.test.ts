@@ -348,4 +348,124 @@ describe("Lambda handler routing", () => {
 
     expect(result.statusCode).toBe(400);
   });
+
+  it("OPTIONS /emails returns 200 with CORS preflight headers", async () => {
+    /**
+     * Verifies that an OPTIONS preflight request to /emails returns HTTP 200
+     * with the required CORS headers so browsers allow cross-origin requests
+     * from the Chrome extension running in the mail.google.com context.
+     *
+     * This matters because browsers send an OPTIONS preflight before any
+     * cross-origin POST or GET with custom headers. If the preflight is not
+     * answered correctly, the browser blocks the actual request entirely,
+     * meaning no tracking pixels are registered and no emails are listed.
+     *
+     * If this contract breaks, the Chrome extension cannot communicate with
+     * the Lambda endpoint and all tracking functionality silently stops working.
+     */
+    const { handler } = await import("../index.js");
+
+    // WHEN
+    const result = await handler({
+      rawPath: "/emails",
+      requestContext: { http: { method: "OPTIONS" } },
+    });
+
+    // THEN
+    expect(result.statusCode).toBe(200);
+    expect(result.headers?.["Access-Control-Allow-Origin"]).toBe("https://mail.google.com");
+    expect(result.headers?.["Access-Control-Allow-Methods"]).toContain("GET");
+    expect(result.headers?.["Access-Control-Allow-Methods"]).toContain("POST");
+    expect(result.headers?.["Access-Control-Allow-Methods"]).toContain("OPTIONS");
+    expect(result.headers?.["Access-Control-Allow-Headers"]).toContain("Content-Type");
+  });
+
+  it("OPTIONS /emailTrack/{pixelId} returns 200 with CORS preflight headers", async () => {
+    /**
+     * Verifies that an OPTIONS preflight request to any /emailTrack/ path
+     * returns HTTP 200 with CORS headers.
+     *
+     * This matters for the same reason as OPTIONS /emails — browsers preflight
+     * all cross-origin requests. The tracking pixel is fetched from
+     * mail.google.com, so the endpoint must handle OPTIONS on any path.
+     *
+     * If this contract breaks, the preflight fails and the actual pixel fetch
+     * is blocked, preventing open events from being recorded.
+     */
+    const { handler } = await import("../index.js");
+
+    // WHEN
+    const result = await handler({
+      rawPath: "/emailTrack/some-pixel-id",
+      requestContext: { http: { method: "OPTIONS" } },
+    });
+
+    // THEN
+    expect(result.statusCode).toBe(200);
+    expect(result.headers?.["Access-Control-Allow-Origin"]).toBe("https://mail.google.com");
+  });
+
+  it("GET /emails response includes Access-Control-Allow-Origin header", async () => {
+    /**
+     * Verifies that every GET /emails response carries the
+     * Access-Control-Allow-Origin header, not just preflight responses.
+     *
+     * This matters because CORS requires the actual response (not just the
+     * preflight) to also include the origin header. Without it, the browser
+     * blocks the response even when the preflight succeeded, so the extension
+     * never receives the email list.
+     *
+     * If this contract breaks, the preflight passes but the browser still
+     * rejects the response, leaving the tracking dashboard empty.
+     */
+    const db = await import("../db.js");
+    vi.mocked(db.scanRecords).mockResolvedValue([]);
+
+    const { handler } = await import("../index.js");
+
+    // WHEN
+    const result = await handler({
+      rawPath: "/emails",
+      requestContext: { http: { method: "GET" } },
+    });
+
+    // THEN
+    expect(result.headers?.["Access-Control-Allow-Origin"]).toBe("https://mail.google.com");
+  });
+
+  it("POST /emails response includes Access-Control-Allow-Origin header", async () => {
+    /**
+     * Verifies that every POST /emails response carries the
+     * Access-Control-Allow-Origin header alongside route-specific headers.
+     *
+     * This matters because browsers verify the CORS header on actual responses
+     * in addition to preflights. A missing header on the POST response means
+     * the browser blocks the reply and the extension cannot confirm that
+     * tracking pixels were successfully registered.
+     *
+     * If this contract breaks, POST requests appear to succeed server-side
+     * but the extension sees a network error and cannot update its UI.
+     */
+    const db = await import("../db.js");
+    vi.mocked(db.putRecord).mockResolvedValue(undefined);
+
+    const { handler } = await import("../index.js");
+
+    // WHEN
+    const result = await handler({
+      rawPath: "/emails",
+      requestContext: { http: { method: "POST" } },
+      body: JSON.stringify({
+        email_group_id: "grp-cors",
+        recipients: [{ email: "cors@test.com", pixel_id: "px-cors" }],
+        subject: "CORS Test",
+        sent_at: "2024-01-01T00:00:00Z",
+      }),
+    });
+
+    // THEN
+    expect(result.headers?.["Access-Control-Allow-Origin"]).toBe("https://mail.google.com");
+    // Route-specific headers must be preserved alongside CORS headers
+    expect(result.headers?.["Content-Type"]).toBe("application/json");
+  });
 });
