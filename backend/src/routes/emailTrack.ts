@@ -60,10 +60,10 @@ export async function emailTrack(
     return pngResponse;
   }
 
-  // Safety net: ignore any open within 10 seconds of send. Gmail's prefetch
-  // hits at ~2s; a real human can't open an email that fast.
+  // Safety net: ignore any open within 5 seconds of send. Gmail's prefetch
+  // hits at ~2s; delivery + inbox render + human reaction takes longer than 5s.
   const secondsSinceSend = (Date.now() - new Date(record.sent_at).getTime()) / 1000;
-  if (secondsSinceSend < 10) {
+  if (secondsSinceSend < 5) {
     return pngResponse;
   }
 
