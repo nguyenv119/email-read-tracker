@@ -57,7 +57,7 @@ describe("getAuthToken (background-side wrapper)", () => {
     );
 
     // WHEN / THEN
-    await expect(getAuthTokenInBackground()).rejects.toThrow(/auth token/i);
+    await expect(getAuthTokenInBackground()).rejects.toThrow(/no token/i);
   });
 });
 

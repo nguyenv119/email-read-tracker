@@ -35,6 +35,13 @@ export async function emailTrack(
     return pngResponse;
   }
 
+  // Gmail's image proxy pre-fetches all images when displaying emails, which
+  // would trigger false "opened" events. Filter these out so only real opens
+  // from actual email clients are recorded.
+  if (/GoogleImageProxy/i.test(userAgent)) {
+    return pngResponse;
+  }
+
   const openEvent = {
     timestamp: new Date().toISOString(),
     ip: sourceIp,
