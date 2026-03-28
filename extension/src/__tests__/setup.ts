@@ -17,6 +17,7 @@ import { vi } from "vitest";
 
 vi.stubGlobal("chrome", {
   runtime: {
+    id: "test-extension-id",
     onMessage: {
       addListener: vi.fn(),
     },

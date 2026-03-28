@@ -96,6 +96,18 @@ describe("getAuthToken (content-script side — sends message to background)", (
     expect(token).toBe("tok_xyz");
   });
 
+  it("rejects with a descriptive error when extension context is invalidated", async () => {
+    // GIVEN — chrome.runtime.id is undefined (extension was reloaded)
+    const original = chrome.runtime.id;
+    Object.defineProperty(chrome.runtime, "id", { value: undefined, configurable: true });
+
+    // WHEN / THEN
+    await expect(getAuthToken()).rejects.toThrow(/refresh the page/i);
+
+    // Cleanup
+    Object.defineProperty(chrome.runtime, "id", { value: original, configurable: true });
+  });
+
   it("rejects when the background responds without a token", async () => {
     /**
      * Verifies that getAuthToken rejects when the background response does
