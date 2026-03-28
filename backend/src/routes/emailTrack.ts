@@ -42,6 +42,16 @@ export async function emailTrack(
     return pngResponse;
   }
 
+  // Gmail also pre-fetches images with a spoofed regular browser user agent
+  // immediately after the email is sent (within seconds). A real human cannot
+  // open an email that fast. Ignore opens within 30 seconds of sent_at.
+  const sentTime = new Date(record.sent_at).getTime();
+  const now = Date.now();
+  const secondsSinceSend = (now - sentTime) / 1000;
+  if (secondsSinceSend < 30) {
+    return pngResponse;
+  }
+
   const openEvent = {
     timestamp: new Date().toISOString(),
     ip: sourceIp,
