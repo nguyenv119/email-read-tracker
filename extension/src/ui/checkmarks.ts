@@ -4,7 +4,7 @@
  * observeMessageList() starts a MutationObserver on document.body. When new
  * DOM nodes are added, it scans them for Gmail message-list rows (tr[role="row"]),
  * extracts the subject text, looks up tracking records via getBySubject(), and
- * injects a checkmark span next to the subject.
+ * injects a checkmark span next to the sender name (after div.yW).
  *
  * Three-tier state:
  *   untracked — gray ✓ (.mt-checkmark base only)
@@ -34,9 +34,17 @@ export const CHECKMARK_ATTR = "data-mailtrack-checkmark";
 
 /**
  * Gmail uses a span with class "bog" as the subject text element in the
- * message list. This selector targets it within a row.
+ * message list. This selector is used only for extracting the subject text
+ * to look up tracking records — it is NOT the visual injection anchor.
  */
-const SUBJECT_SELECTOR = "span.bog";
+const SUBJECT_LOOKUP_SELECTOR = "span.bog";
+
+/**
+ * Gmail's sender name container in the message list. The checkmark span is
+ * injected immediately after this element so it appears next to the sender
+ * name rather than next to the subject text.
+ */
+const SENDER_ANCHOR_SELECTOR = "div.yW";
 
 /** Module-level guard: true once observeMessageList() has been called. */
 let observing = false;
@@ -56,7 +64,7 @@ export function _resetObservingForTest(): void {
  * Returns null if no subject element is found.
  */
 function extractSubject(row: Element): string | null {
-  const el = row.querySelector(SUBJECT_SELECTOR);
+  const el = row.querySelector(SUBJECT_LOOKUP_SELECTOR);
   return el?.textContent?.trim() ?? null;
 }
 
@@ -94,13 +102,14 @@ function checkmarkClass(state: CheckmarkState): string | null {
 }
 
 /**
- * Inject a checkmark span into a row element. Attaches hover listeners for
- * the popup only on tracked and opened rows — gray (untracked) rows have no
- * popup since there is no tracking data to display.
+ * Inject a checkmark span into a row element. The checkmark is placed after
+ * div.yW (the sender name container) so it appears next to the sender name.
+ * Attaches hover listeners for the popup only on tracked and opened rows —
+ * gray (untracked) rows have no popup since there is no tracking data to display.
  */
 function injectCheckmark(row: Element, state: CheckmarkState, records: EmailTrackingRecord[]): void {
-  const subjectEl = row.querySelector(SUBJECT_SELECTOR);
-  if (!subjectEl) return;
+  const senderAnchor = row.querySelector(SENDER_ANCHOR_SELECTOR);
+  if (!senderAnchor) return;
 
   const span = document.createElement("span");
   span.setAttribute(CHECKMARK_ATTR, "true");
@@ -118,7 +127,7 @@ function injectCheckmark(row: Element, state: CheckmarkState, records: EmailTrac
     });
   }
 
-  subjectEl.after(span);
+  senderAnchor.after(span);
 }
 
 /**

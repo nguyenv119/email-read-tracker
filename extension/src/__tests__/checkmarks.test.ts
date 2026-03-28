@@ -42,16 +42,40 @@ import {
 // DOM helpers
 // ---------------------------------------------------------------------------
 
-/** Build a minimal Gmail-style message row element with a subject span. */
+/**
+ * Build a minimal Gmail-style message row element with both the sender name
+ * container (div.yW) and a subject span (span.bog), matching the real Gmail DOM.
+ *
+ * The sender cell contains div.yW (injection anchor) and the subject cell
+ * contains span.bog (used only for tracking data lookup).
+ */
 function makeGmailRow(subject: string): HTMLElement {
   const row = document.createElement("tr");
   row.setAttribute("role", "row");
+
+  // Sender name cell — div.yW is the injection anchor
+  const senderCell = document.createElement("td");
+  const senderDiv = document.createElement("div");
+  senderDiv.className = "yW";
+  const senderBa4 = document.createElement("span");
+  senderBa4.className = "bA4";
+  const senderName = document.createElement("span");
+  senderName.className = "yP";
+  senderName.setAttribute("email", "test@example.com");
+  senderName.textContent = "Test Sender";
+  senderBa4.appendChild(senderName);
+  senderDiv.appendChild(senderBa4);
+  senderCell.appendChild(senderDiv);
+  row.appendChild(senderCell);
+
+  // Subject cell — span.bog is the tracking data lookup selector
   const subjectCell = document.createElement("td");
   const subjectSpan = document.createElement("span");
-  subjectSpan.className = "bog"; // Gmail's subject span class
+  subjectSpan.className = "bog";
   subjectSpan.textContent = subject;
   subjectCell.appendChild(subjectSpan);
   row.appendChild(subjectCell);
+
   document.body.appendChild(row);
   return row;
 }
@@ -389,6 +413,40 @@ describe("checkmarks.ts", () => {
     // THEN — at least one open => ✓✓
     const checkmark = row.querySelector(`[${CHECKMARK_ATTR}]`);
     expect(checkmark!.textContent).toContain("✓✓");
+  });
+
+  it("injects checkmark after div.yW (sender name container), not after span.bog (subject)", () => {
+    /**
+     * Verifies that the checkmark span is placed immediately after the
+     * div.yW sender-name container, not after the span.bog subject element.
+     *
+     * The task requires checkmarks to appear next to the sender name, not the
+     * subject line. The visual placement anchor is div.yW; span.bog is only
+     * used to look up tracking data by subject.
+     *
+     * If this contract is violated, the checkmark appears next to the subject
+     * text (old behavior) instead of next to the sender name, breaking the
+     * intended UX layout.
+     */
+    // GIVEN
+    mockGetBySubject.mockReturnValue([makeRecord({ opens: [] })]);
+    observeMessageList();
+    const row = makeGmailRow("Hello World");
+
+    // WHEN
+    fireMutation(row);
+
+    // THEN — checkmark is the next sibling of div.yW (the sender container)
+    const senderDiv = row.querySelector("div.yW") as HTMLElement;
+    expect(senderDiv).not.toBeNull();
+    const checkmark = senderDiv.nextElementSibling as HTMLElement;
+    expect(checkmark).not.toBeNull();
+    expect(checkmark.getAttribute(CHECKMARK_ATTR)).toBe("true");
+
+    // AND — span.bog is NOT immediately followed by the checkmark
+    const subjectSpan = row.querySelector("span.bog") as HTMLElement;
+    expect(subjectSpan).not.toBeNull();
+    expect(subjectSpan.nextElementSibling?.getAttribute(CHECKMARK_ATTR)).not.toBe("true");
   });
 
   it("rescanAllRows injects checkmarks on rows already in the DOM when called", () => {
