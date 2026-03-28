@@ -11,7 +11,7 @@
 import type { EmailTrackingRecord } from "../../../shared/src/types.js";
 import { BACKEND_URL } from "../config.js";
 
-export const POLL_INTERVAL_MS = 30_000;
+export const POLL_INTERVAL_MS = 10_000;
 
 /**
  * Cache: email_group_id → EmailTrackingRecord[]
