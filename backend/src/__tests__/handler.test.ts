@@ -327,6 +327,85 @@ describe("Lambda handler routing", () => {
     expect(result.headers?.["Content-Type"]).toBe("image/png");
   });
 
+  it("OPTIONS preflight returns 200 with CORS headers", async () => {
+    const { handler } = await import("../index.js");
+    const result = await handler({
+      rawPath: "/emails",
+      requestContext: { http: { method: "OPTIONS" } },
+    });
+
+    expect(result.statusCode).toBe(200);
+    expect(result.headers?.["Access-Control-Allow-Origin"]).toBe(
+      "https://mail.google.com"
+    );
+    expect(result.headers?.["Access-Control-Allow-Methods"]).toBe(
+      "GET, POST, OPTIONS"
+    );
+    expect(result.headers?.["Access-Control-Allow-Headers"]).toBe(
+      "Content-Type, Authorization"
+    );
+  });
+
+  it("GET /emails includes CORS headers alongside Content-Type", async () => {
+    const db = await import("../db.js");
+    vi.mocked(db.scanRecords).mockResolvedValue([]);
+
+    const { handler } = await import("../index.js");
+    const result = await handler({
+      rawPath: "/emails",
+      requestContext: { http: { method: "GET" } },
+    });
+
+    expect(result.statusCode).toBe(200);
+    expect(result.headers?.["Access-Control-Allow-Origin"]).toBe(
+      "https://mail.google.com"
+    );
+    expect(result.headers?.["Content-Type"]).toBe("application/json");
+  });
+
+  it("POST /emails includes CORS headers alongside Content-Type", async () => {
+    const db = await import("../db.js");
+    vi.mocked(db.putRecord).mockResolvedValue(undefined);
+
+    const body: CreateEmailRequest = {
+      email_group_id: "grp-cors",
+      recipients: [{ email: "a@b.com", pixel_id: "px-cors" }],
+      subject: "CORS test",
+      sent_at: "2024-01-01T00:00:00Z",
+    };
+
+    const { handler } = await import("../index.js");
+    const result = await handler({
+      rawPath: "/emails",
+      requestContext: { http: { method: "POST" } },
+      body: JSON.stringify(body),
+    });
+
+    expect(result.statusCode).toBe(201);
+    expect(result.headers?.["Access-Control-Allow-Origin"]).toBe(
+      "https://mail.google.com"
+    );
+    expect(result.headers?.["Content-Type"]).toBe("application/json");
+  });
+
+  it("GET /emailTrack/{pixelId} includes CORS headers alongside Content-Type", async () => {
+    const db = await import("../db.js");
+    vi.mocked(db.getRecord).mockResolvedValue(undefined);
+
+    const { handler } = await import("../index.js");
+    const result = await handler({
+      rawPath: "/emailTrack/px-cors-test",
+      requestContext: { http: { method: "GET" } },
+      headers: {},
+    });
+
+    expect(result.statusCode).toBe(200);
+    expect(result.headers?.["Access-Control-Allow-Origin"]).toBe(
+      "https://mail.google.com"
+    );
+    expect(result.headers?.["Content-Type"]).toBe("image/png");
+  });
+
   it("POST /emails returns 400 when body is missing required fields", async () => {
     /**
      * Verifies that POST /emails returns HTTP 400 when the request body is

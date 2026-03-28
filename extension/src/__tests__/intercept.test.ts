@@ -36,6 +36,12 @@ vi.mock("../gmail/auth.js", () => ({
 }));
 
 import { observeComposeWindows } from "../gmail/intercept.js";
+import {
+  setupMutationObserverStub,
+  teardownMutationObserverStub,
+  fireMutation,
+  getCapturedCallback,
+} from "./helpers/mutation-observer.js";
 
 // ---------------------------------------------------------------------------
 // Fixture loading — same pattern as compose.test.ts
@@ -44,50 +50,6 @@ import { observeComposeWindows } from "../gmail/intercept.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE_PATH = path.resolve(__dirname, "fixtures/gmail-compose.html");
 const FIXTURE_HTML: string = fs.readFileSync(FIXTURE_PATH, "utf8");
-
-// ---------------------------------------------------------------------------
-// Shared MutationObserver stub helpers
-// ---------------------------------------------------------------------------
-
-let capturedCallback: MutationCallback | null = null;
-let OriginalMO: typeof MutationObserver;
-
-function setupMutationObserverStub(): void {
-  capturedCallback = null;
-  OriginalMO = window.MutationObserver;
-  vi.stubGlobal(
-    "MutationObserver",
-    vi.fn(function (this: MutationObserver, cb: MutationCallback) {
-      capturedCallback = cb;
-      this.observe = vi.fn();
-      this.disconnect = vi.fn();
-      this.takeRecords = () => [];
-    })
-  );
-}
-
-function teardownMutationObserverStub(): void {
-  vi.stubGlobal("MutationObserver", OriginalMO);
-}
-
-function fireMutation(addedNode: Node): void {
-  capturedCallback!(
-    [
-      {
-        type: "childList",
-        addedNodes: [addedNode] as unknown as NodeList,
-        removedNodes: [] as unknown as NodeList,
-        target: document.body,
-        previousSibling: null,
-        nextSibling: null,
-        attributeName: null,
-        attributeNamespace: null,
-        oldValue: null,
-      } satisfies MutationRecord,
-    ],
-    {} as MutationObserver
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Tests for intercept.ts
@@ -142,7 +104,7 @@ describe("observeComposeWindows", () => {
      */
     // GIVEN
     observeComposeWindows();
-    expect(capturedCallback).not.toBeNull();
+    expect(getCapturedCallback()).not.toBeNull();
 
     document.body.innerHTML = FIXTURE_HTML;
     const composeDialog = document.querySelector('[role="dialog"]')! as HTMLElement;

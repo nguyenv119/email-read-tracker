@@ -39,6 +39,12 @@ export function getAuthTokenInBackground(): Promise<string> {
  */
 export function getAuthToken(): Promise<string> {
   return new Promise((resolve, reject) => {
+    if (!chrome.runtime?.id) {
+      reject(
+        new Error("Extension context invalidated — please refresh the page")
+      );
+      return;
+    }
     chrome.runtime.sendMessage(
       { type: "GET_AUTH_TOKEN" },
       (response: { token?: string }) => {
