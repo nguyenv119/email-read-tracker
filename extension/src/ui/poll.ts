@@ -24,8 +24,11 @@ let intervalId: ReturnType<typeof setInterval> | null = null;
 /**
  * Fetch /emails and rebuild the cache. Errors are swallowed so a transient
  * network failure never crashes the content script.
+ *
+ * @param onUpdate Optional callback invoked after each successful fetch that
+ *   rebuilds the cache. Used by content.ts to re-scan visible rows.
  */
-async function poll(): Promise<void> {
+async function poll(onUpdate?: () => void): Promise<void> {
   try {
     const res = await fetch(`${BACKEND_URL}/emails`);
     if (!res.ok) return;
@@ -40,6 +43,8 @@ async function poll(): Promise<void> {
       group.push(record);
       cache.set(record.email_group_id, group);
     }
+
+    onUpdate?.();
   } catch {
     // Swallow network errors — stale cache is better than crashing.
   }
@@ -49,12 +54,15 @@ async function poll(): Promise<void> {
  * Start the polling interval. Fires immediately and then every
  * POLL_INTERVAL_MS. Calling startPolling() while already polling is a no-op
  * (the existing interval is not replaced).
+ *
+ * @param onUpdate Optional callback invoked after each successful poll. Lets
+ *   content.ts re-scan rows already in the DOM when new tracking data arrives.
  */
-export function startPolling(): void {
+export function startPolling(onUpdate?: () => void): void {
   if (intervalId !== null) return;
   // Fire immediately, then on interval.
-  void poll();
-  intervalId = setInterval(() => void poll(), POLL_INTERVAL_MS);
+  void poll(onUpdate);
+  intervalId = setInterval(() => void poll(onUpdate), POLL_INTERVAL_MS);
 }
 
 /**

@@ -19,12 +19,13 @@ vi.mock("../ui/poll.js", () => ({
 
 vi.mock("../ui/checkmarks.js", () => ({
   observeMessageList: vi.fn(),
+  rescanAllRows: vi.fn(),
   CHECKMARK_ATTR: "data-mailtrack-checkmark",
 }));
 
 import { observeComposeWindows } from "../gmail/intercept.js";
 import { startPolling } from "../ui/poll.js";
-import { observeMessageList } from "../ui/checkmarks.js";
+import { observeMessageList, rescanAllRows } from "../ui/checkmarks.js";
 
 // Side-effect import: loading this module calls all three bootstrap functions.
 import "../content.js";
@@ -56,25 +57,27 @@ describe("content script", () => {
     expect(observeComposeWindows).toHaveBeenCalledOnce();
   });
 
-  it("calls startPolling on load", () => {
+  it("calls startPolling with rescanAllRows as the onUpdate callback on load", () => {
     /**
-     * Verifies that the content script calls startPolling() exactly once when
-     * the module is first loaded.
+     * Verifies that the content script calls startPolling() with rescanAllRows
+     * as the onUpdate callback.
      *
-     * Without startPolling(), the tracking cache is never populated and no
-     * checkmarks appear in the Gmail message list.
+     * Without this wiring, rows already in the DOM at page load are never
+     * upgraded after polling completes — they remain gray forever even when
+     * tracking data exists in the cache.
      *
-     * If this contract is violated, the UI layer silently shows no checkmarks
-     * even when emails have been tracked and opened.
+     * If this contract is violated, rows rendered before the first poll
+     * completes show no tracking state until the next DOM mutation.
      */
     // GIVEN
-    // vi.mock above ensures startPolling is a spy.
+    // vi.mock above ensures startPolling and rescanAllRows are spies.
 
     // WHEN
     // Module already loaded at import time.
 
     // THEN
     expect(startPolling).toHaveBeenCalledOnce();
+    expect(startPolling).toHaveBeenCalledWith(rescanAllRows);
   });
 
   it("calls observeMessageList on load", () => {

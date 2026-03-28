@@ -18,7 +18,7 @@
 
 import { observeComposeWindows } from "./gmail/intercept.js";
 import { startPolling } from "./ui/poll.js";
-import { observeMessageList } from "./ui/checkmarks.js";
+import { observeMessageList, rescanAllRows } from "./ui/checkmarks.js";
 
 // ---------------------------------------------------------------------------
 // CSS injection
@@ -42,8 +42,11 @@ const CSS = `
   line-height: 1;
   color: #9e9e9e;
 }
+.mt-checkmark--tracked {
+  color: #34a853;
+}
 .mt-checkmark--opened {
-  color: #1a73e8;
+  color: #34a853;
 }
 .mt-popup {
   background: #ffffff;
@@ -88,7 +91,9 @@ function injectStyles(): void {
 
 injectStyles();
 observeComposeWindows();
-startPolling();
+// Pass rescanAllRows as the onUpdate callback so that rows already in the
+// DOM at page load are upgraded as soon as polling data arrives.
+startPolling(rescanAllRows);
 observeMessageList();
 
 export {};

@@ -4,11 +4,19 @@
  * observeMessageList() starts a MutationObserver on document.body. When new
  * DOM nodes are added, it scans them for Gmail message-list rows (tr[role="row"]),
  * extracts the subject text, looks up tracking records via getBySubject(), and
- * injects a ✓ or ✓✓ span next to the subject.
+ * injects a checkmark span next to the subject.
+ *
+ * Three-tier state:
+ *   untracked — gray ✓ (.mt-checkmark base only)
+ *   tracked   — green ✓ (.mt-checkmark.mt-checkmark--tracked)
+ *   opened    — green ✓✓ (.mt-checkmark.mt-checkmark--opened)
+ *
+ * Every row receives a checkmark — untracked rows get a gray one so users can
+ * see at a glance which emails are monitored.
  *
  * When a row is re-processed (e.g., after polling refreshes the cache), any
  * existing checkmark span is updated in-place rather than re-injected, so that
- * ✓ rows can be upgraded to ✓✓ without accumulating duplicate spans.
+ * rows can be upgraded (gray → green, ✓ → ✓✓) without accumulating duplicate spans.
  *
  * Matching strategy: subject text, because it is the only field present in both
  * the tracking data and the Gmail list-view DOM.
@@ -52,44 +60,81 @@ function extractSubject(row: Element): string | null {
   return el?.textContent?.trim() ?? null;
 }
 
+/** Possible tracking states for a Gmail row. */
+type CheckmarkState = "untracked" | "tracked" | "opened";
+
 /**
- * Determine the checkmark text for a set of tracking records.
- * ✓✓ if any record has at least one open; ✓ otherwise.
+ * Determine the checkmark state for a set of tracking records.
+ *   opened    — at least one recipient has opened the email
+ *   tracked   — email was sent with tracking but no opens yet
+ *   untracked — no tracking records found for this subject
  */
-function checkmarkText(records: EmailTrackingRecord[]): string {
+function checkmarkState(records: EmailTrackingRecord[]): CheckmarkState {
+  if (records.length === 0) return "untracked";
   const anyOpened = records.some((r) => r.opens.length > 0);
-  return anyOpened ? "✓✓" : "✓";
+  return anyOpened ? "opened" : "tracked";
+}
+
+/**
+ * Return the display text for a given checkmark state.
+ * ✓✓ for opened; ✓ for tracked and untracked.
+ */
+function checkmarkText(state: CheckmarkState): string {
+  return state === "opened" ? "✓✓" : "✓";
+}
+
+/**
+ * Return the CSS modifier class for a given checkmark state, or null for
+ * untracked rows (which use only the base class).
+ */
+function checkmarkClass(state: CheckmarkState): string | null {
+  if (state === "opened") return "mt-checkmark--opened";
+  if (state === "tracked") return "mt-checkmark--tracked";
+  return null;
 }
 
 /**
  * Inject a checkmark span into a row element. Attaches hover listeners for
- * the popup.
+ * the popup only on tracked and opened rows — gray (untracked) rows have no
+ * popup since there is no tracking data to display.
  */
-function injectCheckmark(row: Element, records: EmailTrackingRecord[]): void {
+function injectCheckmark(row: Element, state: CheckmarkState, records: EmailTrackingRecord[]): void {
   const subjectEl = row.querySelector(SUBJECT_SELECTOR);
   if (!subjectEl) return;
 
   const span = document.createElement("span");
   span.setAttribute(CHECKMARK_ATTR, "true");
   span.className = "mt-checkmark";
-  span.textContent = checkmarkText(records);
+  const modifier = checkmarkClass(state);
+  if (modifier) span.classList.add(modifier);
+  span.textContent = checkmarkText(state);
 
-  span.addEventListener("mouseenter", () => {
-    showPopup(records, span as HTMLElement);
-  });
-  span.addEventListener("mouseleave", () => {
-    hidePopup();
-  });
+  if (state !== "untracked") {
+    span.addEventListener("mouseenter", () => {
+      showPopup(records, span as HTMLElement);
+    });
+    span.addEventListener("mouseleave", () => {
+      hidePopup();
+    });
+  }
 
   subjectEl.after(span);
 }
 
 /**
  * Process a single DOM node: if it is (or contains) Gmail message-list rows,
- * inject or update checkmarks for any tracked subjects.
+ * inject or update checkmarks on every row.
+ *
+ * Every row receives a checkmark regardless of tracking state:
+ *   - untracked rows get a gray ✓ (no popup)
+ *   - tracked rows get a green ✓ (with popup)
+ *   - opened rows get a green ✓✓ (with popup)
  *
  * For rows that already have a checkmark span, re-checks the current tracking
- * state and updates the span text/class if the status changed (✓ → ✓✓).
+ * state and updates the span text and CSS class if the state changed
+ * (untracked → tracked, tracked → opened). Popup listeners are also attached
+ * when a row transitions from gray to green.
+ *
  * Only skips a row entirely when the existing checkmark already matches the
  * current state.
  */
@@ -109,19 +154,55 @@ function processNode(node: Node): void {
     if (!subject) continue;
 
     const records = getBySubject(subject);
-    if (records.length === 0) continue;
-
-    const desired = checkmarkText(records);
+    const state = checkmarkState(records);
+    const desiredText = checkmarkText(state);
+    const desiredClass = checkmarkClass(state);
     const existing = row.querySelector<HTMLElement>(`[${CHECKMARK_ATTR}]`);
 
     if (existing) {
-      // Row already decorated — update in place only if the status changed.
-      if (existing.textContent !== desired) {
-        existing.textContent = desired;
+      // Row already decorated — update in place if text or class changed.
+      if (existing.textContent !== desiredText) {
+        existing.textContent = desiredText;
+      }
+
+      const hasTracked = existing.classList.contains("mt-checkmark--tracked");
+      const hasOpened = existing.classList.contains("mt-checkmark--opened");
+      const currentClass = hasOpened
+        ? "mt-checkmark--opened"
+        : hasTracked
+        ? "mt-checkmark--tracked"
+        : null;
+
+      if (currentClass !== desiredClass) {
+        if (currentClass) existing.classList.remove(currentClass);
+        if (desiredClass) existing.classList.add(desiredClass);
+
+        // Attach popup listeners when upgrading from gray to a tracked state.
+        if (state !== "untracked") {
+          existing.addEventListener("mouseenter", () => {
+            showPopup(records, existing);
+          });
+          existing.addEventListener("mouseleave", () => {
+            hidePopup();
+          });
+        }
       }
     } else {
-      injectCheckmark(row, records);
+      injectCheckmark(row, state, records);
     }
+  }
+}
+
+/**
+ * Re-process every Gmail message-list row currently in the document.
+ * Called by content.ts after each successful poll so that rows already
+ * rendered in the DOM are upgraded (gray → green, ✓ → ✓✓) when new
+ * tracking data arrives, without waiting for a DOM mutation.
+ */
+export function rescanAllRows(): void {
+  const rows = Array.from(document.querySelectorAll('tr[role="row"]'));
+  for (const row of rows) {
+    processNode(row);
   }
 }
 

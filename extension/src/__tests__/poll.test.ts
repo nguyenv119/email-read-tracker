@@ -197,6 +197,59 @@ describe("poll.ts", () => {
     expect(fetchMock.mock.calls.length).toBe(callsAfterStart);
   });
 
+  it("calls onUpdate callback after each successful poll", async () => {
+    /**
+     * Verifies that startPolling() accepts an optional onUpdate callback and
+     * invokes it once after each successful fetch that rebuilds the cache.
+     *
+     * content.ts wires onUpdate to re-scan all visible Gmail rows so that
+     * rows already in the DOM get checkmarks as soon as the first poll
+     * returns. Without this callback, rows rendered before the initial fetch
+     * completes remain uncheckmarked for the entire polling cycle (30 s).
+     *
+     * If this contract is violated, the UI only updates when a new row is
+     * added to the DOM — existing rows at page load time are never decorated.
+     */
+    // GIVEN
+    const onUpdate = vi.fn();
+    const records = [makeRecord()];
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, json: async () => records })
+      .mockResolvedValueOnce({ ok: true, json: async () => records });
+
+    // WHEN — initial poll fires immediately, then one interval
+    startPolling(onUpdate);
+    await vi.advanceTimersByTimeAsync(0);               // immediate poll
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS); // second poll
+
+    // THEN — callback invoked once per successful fetch
+    expect(onUpdate).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not call onUpdate callback when fetch returns non-OK", async () => {
+    /**
+     * Verifies that the onUpdate callback is NOT invoked when a poll fails
+     * with a non-OK HTTP response.
+     *
+     * A failed poll leaves the cache unchanged; triggering onUpdate would
+     * cause a needless re-scan of the DOM against stale data. It could also
+     * mislead callers into thinking fresh data arrived.
+     *
+     * If this contract is violated, the re-scan fires on every error response,
+     * wasting work and potentially flickering checkmark states.
+     */
+    // GIVEN
+    const onUpdate = vi.fn();
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 500 });
+
+    // WHEN
+    startPolling(onUpdate);
+    await vi.advanceTimersByTimeAsync(0);
+
+    // THEN — callback never called on failure
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
   it("getBySubject returns all records whose subject matches", async () => {
     /**
      * Verifies that getBySubject returns all tracking records across groups
