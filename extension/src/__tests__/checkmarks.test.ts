@@ -415,18 +415,14 @@ describe("checkmarks.ts", () => {
     expect(checkmark!.textContent).toContain("✓✓");
   });
 
-  it("injects checkmark after div.yW (sender name container), not after span.bog (subject)", () => {
+  it("injects checkmark inside div.yW (sender name container) as last child", () => {
     /**
-     * Verifies that the checkmark span is placed immediately after the
-     * div.yW sender-name container, not after the span.bog subject element.
+     * Verifies that the checkmark span is appended as the last child of
+     * div.yW so it renders inline to the RIGHT of the sender name text.
      *
-     * The task requires checkmarks to appear next to the sender name, not the
-     * subject line. The visual placement anchor is div.yW; span.bog is only
-     * used to look up tracking data by subject.
-     *
-     * If this contract is violated, the checkmark appears next to the subject
-     * text (old behavior) instead of next to the sender name, breaking the
-     * intended UX layout.
+     * Using appendChild (inside) instead of after (outside) ensures the
+     * checkmark inherits the container's inline layout and appears next to
+     * the name rather than on a separate line.
      */
     // GIVEN
     mockGetBySubject.mockReturnValue([makeRecord({ opens: [] })]);
@@ -436,14 +432,14 @@ describe("checkmarks.ts", () => {
     // WHEN
     fireMutation(row);
 
-    // THEN — checkmark is the next sibling of div.yW (the sender container)
+    // THEN — checkmark is the last child of div.yW
     const senderDiv = row.querySelector("div.yW") as HTMLElement;
     expect(senderDiv).not.toBeNull();
-    const checkmark = senderDiv.nextElementSibling as HTMLElement;
+    const checkmark = senderDiv.lastElementChild as HTMLElement;
     expect(checkmark).not.toBeNull();
     expect(checkmark.getAttribute(CHECKMARK_ATTR)).toBe("true");
 
-    // AND — span.bog is NOT immediately followed by the checkmark
+    // AND — span.bog is NOT followed by the checkmark
     const subjectSpan = row.querySelector("span.bog") as HTMLElement;
     expect(subjectSpan).not.toBeNull();
     expect(subjectSpan.nextElementSibling?.getAttribute(CHECKMARK_ATTR)).not.toBe("true");

@@ -33,20 +33,24 @@ const CSS = `
 /* MailTrack — tracking UI styles */
 .mt-checkmark {
   display: inline-block;
-  margin-left: 4px;
-  font-size: 11px;
-  font-weight: bold;
+  margin-left: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -1px;
   cursor: default;
   user-select: none;
-  vertical-align: middle;
+  vertical-align: baseline;
   line-height: 1;
   color: #9e9e9e;
+  opacity: 0.7;
 }
 .mt-checkmark--tracked {
   color: #34a853;
+  opacity: 1;
 }
 .mt-checkmark--opened {
   color: #34a853;
+  opacity: 1;
 }
 .mt-popup {
   background: #ffffff;

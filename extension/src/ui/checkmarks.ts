@@ -102,8 +102,10 @@ function checkmarkClass(state: CheckmarkState): string | null {
 }
 
 /**
- * Inject a checkmark span into a row element. The checkmark is placed after
- * div.yW (the sender name container) so it appears next to the sender name.
+ * Inject a checkmark span into a row element. The checkmark is appended as the
+ * last child of div.yW (the sender name container) so it appears to the RIGHT
+ * of the sender name. Using appendChild instead of after() ensures it renders
+ * inline with the name text rather than outside the container.
  * Attaches hover listeners for the popup only on tracked and opened rows —
  * gray (untracked) rows have no popup since there is no tracking data to display.
  */
@@ -127,7 +129,7 @@ function injectCheckmark(row: Element, state: CheckmarkState, records: EmailTrac
     });
   }
 
-  senderAnchor.after(span);
+  senderAnchor.appendChild(span);
 }
 
 /**
