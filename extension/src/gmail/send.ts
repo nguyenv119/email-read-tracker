@@ -143,9 +143,10 @@ async function gmailSend(
 export async function sendTrackedEmails(opts: SendOptions): Promise<void> {
   const { token, recipients, subject, bodyHtml } = opts;
 
-  // Resolve the real sender address from the Gmail profile API so that the
-  // From: header contains an actual email address rather than the literal "me".
-  const from = await getSenderEmail(token);
+  // Gmail's send API overrides the From: header with the authenticated user's
+  // email, so we don't need to call the Profile API (which requires additional
+  // scopes beyond gmail.send). Using "me" as a placeholder is sufficient.
+  const from = "me";
 
   const email_group_id = crypto.randomUUID();
   const sent_at = new Date().toISOString();

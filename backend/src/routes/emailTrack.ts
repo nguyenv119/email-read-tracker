@@ -35,6 +35,38 @@ export async function emailTrack(
     return pngResponse;
   }
 
+  // --- Gmail false-open filters ---
+  //
+  // Gmail pre-fetches images two ways, both triggering false "opened" events:
+  //
+  // 1. GoogleImageProxy: fires on real opens but identified by UA string.
+  //    We actually WANT these — they indicate a real user opened the email.
+  //    However, the proxy also fires during delivery for active sessions.
+  //
+  // 2. Spoofed browser UA: uses a frozen "Chrome/42 + Edge/12" combo that
+  //    no real browser has. This is the prefetch bot that fires ~2s after send.
+  //    See: https://www.gmass.co/blog/false-opens-in-gmail/
+  //
+  // Filter strategy: block the known bot UA, plus a 10-second timing safety
+  // net for any future bot variants we haven't fingerprinted yet.
+
+  // Block Gmail's prefetch bot (impossible Chrome/42 + Edge/12 combo)
+  if (/Chrome\/42\..*Edge\/12\./i.test(userAgent)) {
+    return pngResponse;
+  }
+
+  // Block GoogleImageProxy (fires during delivery for active Gmail sessions)
+  if (/GoogleImageProxy/i.test(userAgent)) {
+    return pngResponse;
+  }
+
+  // Safety net: ignore any open within 5 seconds of send. Gmail's prefetch
+  // hits at ~2s; delivery + inbox render + human reaction takes longer than 5s.
+  const secondsSinceSend = (Date.now() - new Date(record.sent_at).getTime()) / 1000;
+  if (secondsSinceSend < 5) {
+    return pngResponse;
+  }
+
   const openEvent = {
     timestamp: new Date().toISOString(),
     ip: sourceIp,

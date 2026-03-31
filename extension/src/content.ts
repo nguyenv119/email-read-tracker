@@ -36,19 +36,20 @@ const CSS = `
   margin-left: 6px;
   font-size: 12px;
   font-weight: 600;
-  letter-spacing: -1px;
+  letter-spacing: -2px;
   cursor: default;
   user-select: none;
   vertical-align: baseline;
   line-height: 1;
+}
+.mt-check {
+  letter-spacing: -1px;
+}
+.mt-check--gray {
   color: #9e9e9e;
-  opacity: 0.7;
+  opacity: 0.6;
 }
-.mt-checkmark--tracked {
-  color: #34a853;
-  opacity: 1;
-}
-.mt-checkmark--opened {
+.mt-check--green {
   color: #34a853;
   opacity: 1;
 }

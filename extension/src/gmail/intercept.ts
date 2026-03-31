@@ -97,6 +97,18 @@ function attachSendListener(btn: HTMLElement): void {
             bodyHtml: compose.bodyHtml,
           })
         )
+        .then(() => {
+          // Close the compose window after a successful send. Gmail's own
+          // send flow normally does this, but since we blocked it with
+          // preventDefault we must do it ourselves.
+          // The discard button closes the compose and deletes the auto-saved draft.
+          const discard = composeEl.querySelector<HTMLElement>(
+            '[aria-label*="Discard"], [data-tooltip*="Discard"]'
+          );
+          if (discard) {
+            discard.click();
+          }
+        })
         .catch((err: unknown) => {
           console.error("[MailTrack] Send failed:", err);
         });

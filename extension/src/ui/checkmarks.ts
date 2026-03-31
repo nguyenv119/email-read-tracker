@@ -84,21 +84,29 @@ function checkmarkState(records: EmailTrackingRecord[]): CheckmarkState {
 }
 
 /**
- * Return the display text for a given checkmark state.
- * ✓✓ for opened; ✓ for tracked and untracked.
+ * Build the innerHTML for a checkmark span. Always two checks (✓✓),
+ * with color varying by state:
+ *   untracked — both gray
+ *   tracked   — first green, second gray (partial delivery indicator)
+ *   opened    — both green
  */
-function checkmarkText(state: CheckmarkState): string {
-  return state === "opened" ? "✓✓" : "✓";
+function buildCheckmarkHTML(state: CheckmarkState): string {
+  if (state === "opened") {
+    return '<span class="mt-check mt-check--green">✓</span><span class="mt-check mt-check--green">✓</span>';
+  }
+  if (state === "tracked") {
+    return '<span class="mt-check mt-check--green">✓</span><span class="mt-check mt-check--gray">✓</span>';
+  }
+  // untracked
+  return '<span class="mt-check mt-check--gray">✓</span><span class="mt-check mt-check--gray">✓</span>';
 }
 
 /**
- * Return the CSS modifier class for a given checkmark state, or null for
- * untracked rows (which use only the base class).
+ * Return a string key representing the visual state, used for diffing
+ * to decide if an existing checkmark needs updating.
  */
-function checkmarkClass(state: CheckmarkState): string | null {
-  if (state === "opened") return "mt-checkmark--opened";
-  if (state === "tracked") return "mt-checkmark--tracked";
-  return null;
+function checkmarkStateKey(state: CheckmarkState): string {
+  return state;
 }
 
 /**
@@ -115,10 +123,9 @@ function injectCheckmark(row: Element, state: CheckmarkState, records: EmailTrac
 
   const span = document.createElement("span");
   span.setAttribute(CHECKMARK_ATTR, "true");
+  span.setAttribute("data-mt-state", state);
   span.className = "mt-checkmark";
-  const modifier = checkmarkClass(state);
-  if (modifier) span.classList.add(modifier);
-  span.textContent = checkmarkText(state);
+  span.innerHTML = buildCheckmarkHTML(state);
 
   if (state !== "untracked") {
     span.addEventListener("mouseenter", () => {
@@ -166,30 +173,17 @@ function processNode(node: Node): void {
 
     const records = getBySubject(subject);
     const state = checkmarkState(records);
-    const desiredText = checkmarkText(state);
-    const desiredClass = checkmarkClass(state);
     const existing = row.querySelector<HTMLElement>(`[${CHECKMARK_ATTR}]`);
 
     if (existing) {
-      // Row already decorated — update in place if text or class changed.
-      if (existing.textContent !== desiredText) {
-        existing.textContent = desiredText;
-      }
+      // Row already decorated — update in place if state changed.
+      const currentState = existing.getAttribute("data-mt-state");
+      if (currentState !== state) {
+        existing.setAttribute("data-mt-state", state);
+        existing.innerHTML = buildCheckmarkHTML(state);
 
-      const hasTracked = existing.classList.contains("mt-checkmark--tracked");
-      const hasOpened = existing.classList.contains("mt-checkmark--opened");
-      const currentClass = hasOpened
-        ? "mt-checkmark--opened"
-        : hasTracked
-        ? "mt-checkmark--tracked"
-        : null;
-
-      if (currentClass !== desiredClass) {
-        if (currentClass) existing.classList.remove(currentClass);
-        if (desiredClass) existing.classList.add(desiredClass);
-
-        // Attach popup listeners when upgrading from gray to a tracked state.
-        if (state !== "untracked") {
+        // Attach popup listeners when upgrading from untracked to tracked state.
+        if (currentState === "untracked" && state !== "untracked") {
           existing.addEventListener("mouseenter", () => {
             showPopup(records, existing);
           });

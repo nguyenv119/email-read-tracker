@@ -22,7 +22,10 @@ export function handleMessage(
     // We relay the token back to the content script via sendResponse.
     getAuthTokenInBackground()
       .then((token) => sendResponse({ token }))
-      .catch(() => sendResponse({ token: undefined }));
+      .catch((err) => {
+        console.error("[MailTrack] getAuthToken failed:", err);
+        sendResponse({ token: undefined });
+      });
 
     // Return true to keep the message channel open for the async response.
     return true;

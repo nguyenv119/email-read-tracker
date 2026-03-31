@@ -20,9 +20,16 @@ export function getAuthTokenInBackground(): Promise<string> {
     chrome.identity.getAuthToken(
       { interactive: true },
       (result: chrome.identity.GetAuthTokenResult) => {
-        const token = result?.token;
+        const err = chrome.runtime.lastError;
+        if (err) {
+          reject(new Error(`chrome.identity error: ${err.message}`));
+          return;
+        }
+        // Chrome passes the token as a string in some versions, and as
+        // { token: string } (GetAuthTokenResult) in others.
+        const token = typeof result === "string" ? result : result?.token;
         if (!token) {
-          reject(new Error("Failed to obtain auth token from chrome.identity"));
+          reject(new Error("chrome.identity returned no token"));
           return;
         }
         resolve(token);
